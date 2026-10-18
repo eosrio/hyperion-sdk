@@ -1,0 +1,41 @@
+// Exercise the packed package from a separate consumer, including exported TypeScript declarations.
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const temporary = await mkdtemp(join(tmpdir(), 'hyperion-sdk-consumer-'));
+const npm = process.env.npm_execpath;
+assert.ok(npm, 'Run through npm run test:package');
+const runNpm = (args, cwd) => execFileSync(process.execPath, [npm, ...args], {
+  cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'],
+});
+try {
+  runNpm(['pack', '--pack-destination', temporary], root);
+  const consumer = join(temporary, 'consumer');
+  await mkdir(consumer);
+  await writeFile(join(consumer, 'package.json'), JSON.stringify({ name: 'sdk-consumer', private: true, type: 'module' }));
+  const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+  assert.equal(pkg.private, true, 'Foundation remains unpublished development work');
+  const tarball = join(temporary, `eosrio-hyperion-sdk-${pkg.version}.tgz`);
+  runNpm(['install', '--ignore-scripts', '--no-audit', '--no-fund', tarball], consumer);
+  await writeFile(join(consumer, 'consumer.mts'), `
+import { validateComponentManifest, checkCompatibility, type ComponentManifest } from '@eosrio/hyperion-sdk';
+import schema from '@eosrio/hyperion-sdk/component-manifest.schema.json' with { type: 'json' };
+const manifest = { schemaVersion: 1, package: '@example/plugin', version: '0.1.0', kind: 'plugin',
+  compatibility: { hyperion: '^4.5.0', sdk: '^0.0.0-dev.1' } } satisfies ComponentManifest;
+if (!validateComponentManifest(manifest).valid) throw new Error('Packed manifest validator failed');
+if (!checkCompatibility(manifest, { hyperion: '4.5.0', sdk: '0.0.0-dev.1' }).compatible) throw new Error('Packed compatibility check failed');
+if (schema.properties.schemaVersion.const !== 1) throw new Error('Packed schema missing');
+`);
+  // No @types/node dependency is needed by the consumer; declarations must be independently usable.
+  execFileSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '--strict',
+    '--target', 'ES2022', '--module', 'NodeNext', '--resolveJsonModule', 'consumer.mts'], { cwd: consumer, stdio: 'inherit' });
+  execFileSync(process.execPath, [join(consumer, 'consumer.mjs')], { cwd: consumer, stdio: 'inherit' });
+  console.log('Packed ESM, JSON Schema and TypeScript consumer passed.');
+} finally {
+  await rm(temporary, { recursive: true, force: true });
+}
