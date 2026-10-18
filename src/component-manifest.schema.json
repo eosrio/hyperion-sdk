@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/eosrio/hyperion-sdk/component-manifest.schema.json",
+  "title": "Hyperion component manifest, development schema 1",
+  "description": "Declared version eligibility only. Validation does not establish tested compatibility or authorize execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "package", "version", "kind", "compatibility"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "package": {
+      "type": "string",
+      "pattern": "^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$"
+    },
+    "version": { "type": "string", "format": "semver-version" },
+    "kind": { "enum": ["plugin", "protocol", "backend-adapter"] },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hyperion", "sdk"],
+      "properties": {
+        "hyperion": { "type": "string", "format": "semver-range" },
+        "sdk": { "type": "string", "format": "semver-range" },
+        "engines": { "$ref": "#/definitions/engines" }
+      }
+    }
+  },
+  "if": { "properties": { "kind": { "const": "backend-adapter" } }, "required": ["kind"] },
+  "then": {
+    "properties": {
+      "compatibility": {
+        "type": "object",
+        "properties": { "engines": { "$ref": "#/definitions/engines" } },
+        "required": ["engines"]
+      }
+    }
+  },
+  "else": { "properties": { "compatibility": { "type": "object", "properties": { "engines": false } } } },
+  "definitions": {
+    "engines": {
+      "type": "array",
+      "minItems": 1,
+      "description": "All listed engines are required; alternatives use separate adapter manifests. Names must be unique (checked by the public validator).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "range"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9._-]*$" },
+          "range": { "type": "string", "format": "semver-range" }
+        }
+      }
+    }
+  }
+}

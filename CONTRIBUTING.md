@@ -6,9 +6,10 @@ follow the [shared architecture](https://github.com/eosrio/hyperion-tools/blob/a
 Describe delivered behavior, acceptance evidence, genuine dependencies and compatible component
 versions. Keep public contracts in the SDK and database-native operations in adapters.
 
-This is a development scaffold. Run `python scripts/check-docs.py` for documentation changes.
-Add runtime build, conformance and integration checks with the first implementation slice.
-Scaffold CI does not establish runtime compatibility.
+Install with `npm ci`. Run `npm run typecheck`, `npm test`, `npm run test:package` and
+`npm run check:docs`. Behavioral tests use the public manifest/compatibility API; the package check
+compiles and runs an isolated consumer of the packed artifact. Keep schema, public validation,
+types and metadata documentation aligned. These checks do not establish plugin/runtime compatibility.
 
 Executable plugin upgrades are operator-initiated. Publish package versions and compatibility
 claims only through explicit release work with qualification evidence.
