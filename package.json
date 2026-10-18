@@ -13,7 +13,7 @@
   "files": ["dist/", "docs/", "src/component-manifest.schema.json", "README.md", "LICENSE"],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bun check -p tsconfig.json",
     "test": "npm run build && node --test tests/manifest.test.mjs tests/compatibility.test.mjs",
     "test:package": "node scripts/check-package.mjs",
     "check:docs": "python scripts/check-docs.py",
@@ -21,5 +21,5 @@
   },
   "repository": { "type": "git", "url": "git+https://github.com/eosrio/hyperion-sdk.git" },
   "dependencies": { "ajv": "8.20.0", "semver": "7.8.5" },
-  "devDependencies": { "@types/semver": "7.8.0", "typescript": "5.9.3" }
+  "devDependencies": { "@types/semver": "7.8.0", "typescript": "7.0.2" }
 }
