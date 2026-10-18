@@ -21,6 +21,9 @@ and [release roadmap](https://github.com/eosrio/hyperion-tools/blob/a36fda12ba81
 
 ## First work
 
+Track [SDK issue #1](https://github.com/eosrio/hyperion-sdk/issues/1) and
+[release coordination #24](https://github.com/eosrio/hyperion-tools/issues/24).
+
 The first implementation target is one declarative contract round-tripping through the SDK and
 a real MongoDB adapter. See P05 in the
 [approved issue batch](https://github.com/eosrio/hyperion-tools/blob/a36fda12ba813968ce361e85893206d8f5bceb0f/docs/roadmap/hyperion-4.5-initial-issues.md).
