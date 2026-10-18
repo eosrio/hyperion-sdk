@@ -16,6 +16,8 @@ define package ownership; assigned homes are not implementation or release-suppo
 
 ## Scope
 
+Follow the [shared TypeScript 7 and Bun toolchain policy](https://github.com/eosrio/hyperion-tools/blob/1a38d018cbc25aef3ac35636e11761ef8c9863f3/docs/architecture/hyperion-4.5-typescript-toolchain.md) for development and CI.
+
 - Independently versioned SDK contracts, compatible within each major; breaking contracts require
   a new major.
 - Backend-neutral mutations and logical queries, explicit capabilities and reusable conformance fixtures.
