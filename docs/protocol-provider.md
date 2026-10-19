@@ -53,6 +53,10 @@ must equal the selected profile. The host enforces that binding and controls exe
   interpretation. `encodeRequest`, `decodeResult`, `decodeBlock`, `decodeTraces`, `decodeDeltas`
   and `decodeRow(stream, bytes)` use portable values and `Uint8Array` inputs/outputs. Each method is
   synchronous; asynchronous module loading and transport remain host responsibilities.
+  Sessions that retain resources can implement optional `close(): void`. It must release only
+  that session's resources, be idempotent, and reject later encode/decode use. The host closes
+  replaced sessions and temporary preflight sessions; closing one session cannot invalidate
+  another session or contract codec. Stateless sessions need not implement `close`.
 - `contractCodec` decodes/encodes complete binary contract ABIs and decodes/encodes typed values.
   Its generic `Abi` is portable metadata, preserving protocol-specific fields. An implementation
   must not expose a native decoder handle or convert through a lossy legacy ABI representation.

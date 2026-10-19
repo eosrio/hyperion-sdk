@@ -45,6 +45,8 @@ export interface ProtocolShipSession {
   decodeDeltas(bytes: Uint8Array): unknown;
   /** The host calls this before deciding whether it has a downstream handler for the stream. */
   decodeRow(stream: string, bytes: Uint8Array): unknown;
+  /** Optional idempotent resource release; an implemented close invalidates subsequent session use. */
+  close?(): void;
 }
 
 /** ABI is portable metadata. Implementations must preserve their protocol's complete ABI dialect. */

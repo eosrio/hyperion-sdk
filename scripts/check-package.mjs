@@ -42,10 +42,11 @@ const provider: ProtocolProvider<{version:string}> = {
   contractCodec: {decodeAbi: () => ({version:'example/1'}), encodeAbi: () => new Uint8Array(),
     decodeValue: () => ({}), encodeValue: () => new Uint8Array()},
   createShipSession: () => ({encodeRequest: () => new Uint8Array(), decodeResult: () => ({}),
-    decodeBlock: () => ({}), decodeTraces: () => [], decodeDeltas: () => [], decodeRow: () => ({})}),
+    decodeBlock: () => ({}), decodeTraces: () => [], decodeDeltas: () => [], decodeRow: () => ({}), close: () => {}}),
   normalizeDelta: input => ({kind:'passthrough', value:input.value}),
 };
 if (provider.createShipSession({}).decodeTraces(new Uint8Array()) === undefined) throw new Error('Portable protocol declarations failed');
+provider.createShipSession({}).close?.();
 const lookup: ProtocolNormalizedDelta = {kind:'abi-required', account:'sysio'};
 if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Error('ABI lookup request declaration missing');
 `);
