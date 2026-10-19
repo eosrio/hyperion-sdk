@@ -192,11 +192,14 @@ function components(input: unknown, path: string, errors: Diagnostic[]): Protoco
  */
 export function validateProtocolSelection(descriptor: unknown, selection: unknown): ProtocolSelectionResult {
   const errors: Diagnostic[] = [];
-  try {
-    descriptor = snapshot(descriptor, '/descriptor');
-    selection = snapshot(selection, '/selection');
-  } catch (error) {
-    return {valid: false, errors: [error as Diagnostic]};
+  for (const [path, value] of [['/descriptor', descriptor], ['/selection', selection]] as const) {
+    try {
+      const copy = snapshot(value, path);
+      if (path === '/descriptor') descriptor = copy;
+      else selection = copy;
+    } catch {
+      return {valid: false, errors: [fail(path, 'Expected bounded, plain, acyclic JSON metadata')]};
+    }
   }
   if (!record(descriptor) || !keys(descriptor, ['interfaceVersion', 'manifest', 'profiles'])
     || descriptor.interfaceVersion !== 1) {

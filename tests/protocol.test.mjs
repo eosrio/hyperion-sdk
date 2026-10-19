@@ -122,4 +122,6 @@ test('malformed, cyclic and sparse metadata are bounded validation failures', ()
     {...descriptor(), manifest: new Date()}, {...descriptor(), interfaceVersion: NaN}]) {
     rejects(input, selection(), 'protocol.invalid-descriptor');
   }
+  const trapped = new Proxy({}, {getPrototypeOf() {throw new Error('unreadable metadata');}});
+  rejects(trapped, selection(), 'protocol.invalid-descriptor');
 });

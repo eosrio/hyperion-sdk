@@ -21,7 +21,7 @@ try {
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   assert.equal(pkg.private, true, 'Foundation remains unpublished development work');
   const tarball = join(temporary, `eosrio-hyperion-sdk-${pkg.version}.tgz`);
-  runNpm(['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', tarball], consumer);
+  runNpm(['install', '--ignore-scripts', '--no-audit', '--no-fund', tarball], consumer);
   await writeFile(join(consumer, 'consumer.mts'), `
 import { validateComponentManifest, checkCompatibility, type ComponentManifest } from '@eosrio/hyperion-sdk';
 import { validateProtocolSelection, type ProtocolProvider, type ProtocolDescriptor } from '@eosrio/hyperion-sdk/protocol';
