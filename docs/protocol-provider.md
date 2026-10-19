@@ -84,6 +84,70 @@ backend's physical document ID. The SDK exposes no database operations or native
 Legacy contract plugins still receive their established host payload; this protocol seam does not
 replace `@eosrio/hyperion-plugin-core` or change declarative definitions/logical queries.
 
+## Observe ABI source facts before filtering
+
+The optional synchronous `observeBlockAbi(input, source)` hook is the additive contract for
+[SDK #6](https://github.com/eosrio/hyperion-sdk/issues/6) and
+[History API #213](https://github.com/eosrio/hyperion-history-api/issues/213). Existing providers
+remain valid without the hook. An absent hook cannot authorize ABI applicability or projection
+readiness.
+
+`ProtocolBlockAbiInput` contains the full decoded `traces` and decoded `accountRows`. Each account
+row retains its source `ordinal`, `present` flag, original `Uint8Array` bytes and portable decoded
+`value`. `undefined` records missing input; an empty array records a genuinely empty source list.
+The host calls the hook before whitelists, blacklists, root-action filtering, action truncation,
+grouping or lossy numeric conversion. Capture native ABI mutations even when operators exclude
+the system contract from indexed history.
+
+The host supplies `ProtocolBlockAbiSource`: chain ID, block ID, block number and the preceding
+block ID. `previousBlockId: null` explicitly records an unavailable predecessor, including an
+initial snapshot envelope. It must not be replaced with an invented predecessor. Known IDs must
+match the selected protocol's identifiers. The host binds the captured facts to the verified
+provider profile/component pins and retained raw source; the provider does not declare canonical
+membership, storage durability or readiness.
+
+`ProtocolBlockAbiObservations` has `schemaVersion: 1` and three separate readonly lists:
+
+| List | Source facts |
+| --- | --- |
+| `actionInputs` | Transaction/action occurrence, receiver, action account/name, exact `rawHex`, receipt `globalSequence` and `receiptAbiSequence`, and the originating `inputActionOrdinal` |
+| `deployments` | Target account, exact `abiHex`, mutating action anchor, its receipt `globalSequence`, and `effect: "native-before-receipt"` |
+| `finalStates` | Account presence and raw `abiHex` observed at block end, with the original `deltaOrdinal` |
+
+`transactionId` plus `actionOrdinal` identifies an occurrence within the supplied block. Ordinals
+are safe integers: action/input ordinals are positive; account/delta ordinals are nonnegative.
+Allocation ordinals are not execution order. Sequence evidence uses canonical unsigned decimal
+strings without leading zeros: `globalSequence` is in `[1, 18446744073709551615]`, while
+`receiptAbiSequence` is in `[0, 4294967295]`. Compare sequence values without converting them to
+JavaScript `Number`. Return action/deployment observations in numeric receipt execution order,
+which can differ from their order in an allocation-ordered source array. Hexadecimal fields are
+lowercase, even-length original bytes and may be empty. TypeScript declarations do not validate
+these runtime constraints; the provider and capturing host must enforce them.
+
+For the pinned Wire native handler, a first-receiver `sysio::setabi` changes the target ABI before
+its own receipt. Retain empty, malformed, unsupported and byte-identical deployments as distinct
+observations; ABI-body parsing is not required to capture a mutation. Notification copies do not
+repeat the native mutation. Their `inputActionOrdinal` links to the original first receiver's
+input, with matching account, name, authorization and raw bytes checked against the full source.
+Reject missing/cyclic ancestry, duplicate occurrence ordinals, and duplicate/zero receipt sequences.
+Retain source-backed onblock actions. Unsupported transaction-status, failure or scheduled-action
+semantics must fail extraction rather than guessing that a mutation committed.
+
+A receipt samples ABI metadata after native execution. In particular, self-setabi can expose its
+new sequence on the receipt while its action input precedes the mutation. Receipt sequence equality
+does not prove the applicable input ABI. A final account row describes block-end state and cannot
+select the ABI for an earlier action in that block. Neither list establishes canonical continuity
+or a usable ABI interval. A snapshot at the end of block S cannot prove inputs before or within S.
+
+Missing required input, malformed source data or unsupported semantics must throw. The host keeps
+the raw source and durably records incomplete extraction; failure must never become a successful
+empty observation. Returned facts must be detached from mutable input objects. The host snapshots
+and validates them before persistence and source acknowledgment. Canonical coverage, recovery,
+fork generations and ABI applicability remain runtime responsibilities, outside this SDK hook.
+Capturing observations alone must not enable action decoding or remove an unavailable response.
+Existing retained Elasticsearch history stays usable; this separate projection does not require
+a full history reindex.
+
 ## Versioning and evidence
 
 SDK package version, metadata schema version and protocol `interfaceVersion` remain separate.

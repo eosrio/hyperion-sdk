@@ -57,6 +57,11 @@ The additive [protocol contract](docs/protocol-provider.md) is exercised by
 ABI/value codecs and normalization from database persistence. Import its portable types and
 inert `validateProtocolSelection` validator through `@eosrio/hyperion-sdk/protocol` or the root.
 
+The optional `observeBlockAbi` hook captures separate action-input, native-deployment and
+block-end ABI facts for [History API #213](https://github.com/eosrio/hyperion-history-api/issues/213)
+and [SDK #6](https://github.com/eosrio/hyperion-sdk/issues/6). Observations preserve raw bytes and
+source anchors; they do not establish canonical coverage, ABI applicability or projection readiness.
+
 ## Remaining foundation work
 
 Track [SDK issue #1](https://github.com/eosrio/hyperion-sdk/issues/1) and

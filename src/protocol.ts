@@ -106,6 +106,82 @@ export type ProtocolNormalizedDelta =
   | {kind: 'record'; identity: string; record: unknown; source: ProtocolSource;
     tableName: string; value?: unknown; metadata: Record<string, unknown>};
 
+/** Host-supplied source identity; observations do not establish canonical membership. */
+export interface ProtocolBlockAbiSource {
+  readonly chainId: string;
+  readonly blockId: string;
+  /** Null explicitly records an unavailable predecessor; it cannot establish source continuity. */
+  readonly previousBlockId: string | null;
+  /** Positive safe integer within the selected protocol's block-number range. */
+  readonly blockNum: number;
+}
+
+/** An account row decoded by the selected SHiP session, before downstream filtering. */
+export interface ProtocolAbiAccountRowInput {
+  /** Nonnegative safe integer identifying this row within the source block. */
+  readonly ordinal: number;
+  readonly present: boolean;
+  readonly raw: Uint8Array;
+  readonly value: unknown;
+}
+
+/** Undefined means missing input; an empty array means the source contained no such records. */
+export interface ProtocolBlockAbiInput {
+  readonly traces: unknown | undefined;
+  readonly accountRows: readonly ProtocolAbiAccountRowInput[] | undefined;
+}
+
+/** Occurrence identity within a block, not execution order or an ABI epoch. */
+export interface ProtocolAbiActionAnchor {
+  readonly transactionId: string;
+  /** Positive safe integer; allocation order can differ from execution order. */
+  readonly actionOrdinal: number;
+}
+
+/** Raw action input and receipt evidence, before host parsing, grouping or numeric conversion. */
+export interface ProtocolAbiActionInput extends ProtocolAbiActionAnchor {
+  readonly receiver: string;
+  readonly account: string;
+  readonly name: string;
+  /** Original action bytes as lowercase, even-length hexadecimal; may be empty. */
+  readonly rawHex: string;
+  /** Canonical decimal uint64 in [1, 18446744073709551615], never a JavaScript Number. */
+  readonly globalSequence: string;
+  /** Observed decimal uint32 in [0, 4294967295]; it is not an action-input epoch proof. */
+  readonly receiptAbiSequence: string;
+  /** Positive safe-integer first-receiver occurrence, shared by this transaction's notification copies. */
+  readonly inputActionOrdinal: number;
+}
+
+/** A native ABI mutation, retained even when its bytes are empty, invalid or unchanged. */
+export interface ProtocolAbiDeploymentObservation {
+  readonly account: string;
+  /** Exact raw ABI bytes as lowercase, even-length hexadecimal; no ABI-body validation is implied. */
+  readonly abiHex: string;
+  readonly action: ProtocolAbiActionAnchor;
+  /** The mutating first receiver's canonical decimal uint64 receipt sequence, in [1, 2^64 - 1]. */
+  readonly globalSequence: string;
+  /** Effect occurs after this action's input point and before its own receipt. */
+  readonly effect: 'native-before-receipt';
+}
+
+/** Block-end account state; it does not identify an intra-block action-input ABI. */
+export interface ProtocolAbiFinalStateObservation {
+  readonly account: string;
+  readonly present: boolean;
+  readonly abiHex: string;
+  /** Nonnegative safe integer matching the observed account row's ordinal. */
+  readonly deltaOrdinal: number;
+}
+
+/** Detached source facts only: no canonical coverage, durable progress or ABI applicability proof. */
+export interface ProtocolBlockAbiObservations {
+  readonly schemaVersion: 1;
+  readonly actionInputs: readonly ProtocolAbiActionInput[];
+  readonly deployments: readonly ProtocolAbiDeploymentObservation[];
+  readonly finalStates: readonly ProtocolAbiFinalStateObservation[];
+}
+
 /** Providers are instantiated per chain/worker; executable loading belongs to the host. */
 export interface ProtocolProvider<Abi = unknown> {
   readonly profileId: string;
@@ -113,6 +189,13 @@ export interface ProtocolProvider<Abi = unknown> {
   createShipSession(handshake: unknown): ProtocolShipSession;
   /** Unknown required streams/features must throw; ignoring a known stream requires a reason. */
   normalizeDelta(input: ProtocolDeltaInput, context: ProtocolNormalizationContext<Abi>): ProtocolNormalizedDelta;
+  /**
+   * Observe full source inputs before any host filters or truncation. Missing required data,
+   * malformed sources or unsupported semantics must throw; never disguise failure as empty facts.
+   * The host retains raw source and durably records incomplete extraction separately from facts.
+   * This optional hook does not select an applicable ABI or make a projection ready.
+   */
+  observeBlockAbi?(input: ProtocolBlockAbiInput, source: ProtocolBlockAbiSource): ProtocolBlockAbiObservations;
 }
 
 function fail(path: string, message: string, code = 'protocol.invalid-descriptor'): Diagnostic {
