@@ -4,8 +4,8 @@ Public extension contracts and TypeScript authoring support for Hyperion protoco
 contract projections, backend adapters and API plugins.
 
 Status: Private development package for Hyperion 4.5, maintained by EOS Rio. This foundation
-implements inert component manifests and declared version checks. It provides no projection
-runtime, database adapter or qualified stable SDK release.
+implements inert component manifests, declared version checks and portable protocol-provider
+contracts. It provides no projection runtime, database adapter or qualified stable SDK release.
 
 Read the [architecture definition](https://github.com/eosrio/hyperion-tools/blob/a36fda12ba813968ce361e85893206d8f5bceb0f/docs/architecture/hyperion-4.5.md),
 [ADRs](https://github.com/eosrio/hyperion-tools/tree/a36fda12ba813968ce361e85893206d8f5bceb0f/docs/adr)
@@ -47,7 +47,15 @@ The canonical [JSON Schema](src/component-manifest.schema.json) is also exported
 installs dependencies, updates plugins or establishes tested support. Catalog records and release
 qualification must pin exact component revisions separately.
 
-## First work
+## Protocol-provider development API
+
+The additive [protocol contract](docs/protocol-provider.md) is exercised by
+[History API #212](https://github.com/eosrio/hyperion-history-api/issues/212) and tracked in
+[SDK #4](https://github.com/eosrio/hyperion-sdk/issues/4). It separates SHiP sessions, contract
+ABI/value codecs and normalization from database persistence. Import its portable types and
+inert `validateProtocolSelection` validator through `@eosrio/hyperion-sdk/protocol` or the root.
+
+## Remaining foundation work
 
 Track [SDK issue #1](https://github.com/eosrio/hyperion-sdk/issues/1) and
 [release coordination #24](https://github.com/eosrio/hyperion-tools/issues/24).
@@ -60,5 +68,6 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
 Run `npm ci`, `npm run typecheck`, `npm test`, `npm run test:package` and `npm run check:docs`.
 Node.js 22 or newer is required; CI exercises Node.js 22 and 24. `npm pack` and Git dependency
 installation build through `prepare`. `private: true` prevents accidental registry publication.
-These checks cover metadata validation and a packed ESM/TypeScript consumer, not runtime qualification.
+These checks cover metadata/protocol selection and a packed ESM/TypeScript consumer. Host execution
+and chain/runtime qualification have their own acceptance evidence.
 Licensed under [MIT](LICENSE).

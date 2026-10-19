@@ -21,15 +21,31 @@ try {
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   assert.equal(pkg.private, true, 'Foundation remains unpublished development work');
   const tarball = join(temporary, `eosrio-hyperion-sdk-${pkg.version}.tgz`);
-  runNpm(['install', '--ignore-scripts', '--no-audit', '--no-fund', tarball], consumer);
+  runNpm(['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', tarball], consumer);
   await writeFile(join(consumer, 'consumer.mts'), `
 import { validateComponentManifest, checkCompatibility, type ComponentManifest } from '@eosrio/hyperion-sdk';
+import { validateProtocolSelection, type ProtocolProvider, type ProtocolDescriptor } from '@eosrio/hyperion-sdk/protocol';
 import schema from '@eosrio/hyperion-sdk/component-manifest.schema.json' with { type: 'json' };
 const manifest = { schemaVersion: 1, package: '@example/plugin', version: '0.1.0', kind: 'plugin',
   compatibility: { hyperion: '^4.5.0', sdk: '^0.0.0-dev.1' } } satisfies ComponentManifest;
 if (!validateComponentManifest(manifest).valid) throw new Error('Packed manifest validator failed');
 if (!checkCompatibility(manifest, { hyperion: '4.5.0', sdk: '0.0.0-dev.1' }).compatible) throw new Error('Packed compatibility check failed');
 if (schema.properties.schemaVersion.const !== 1) throw new Error('Packed schema missing');
+const component = {id:'example', runtime:'node' as const, version:'0.1.0', sourceRevision:'a'.repeat(40), sha256:'1'.repeat(64)};
+const descriptor = {interfaceVersion:1, manifest:{...manifest, kind:'protocol'},
+  profiles:[{id:'example', components:[component]}]} satisfies ProtocolDescriptor;
+const result = validateProtocolSelection(descriptor, {profileId:'example',
+  environment:{hyperion:'4.5.0', sdk:'0.0.0-dev.1'}, components:[component]});
+if (!result.valid) throw new Error('Packed protocol validation failed');
+const provider: ProtocolProvider<{version:string}> = {
+  profileId: result.profile.id,
+  contractCodec: {decodeAbi: () => ({version:'example/1'}), encodeAbi: () => new Uint8Array(),
+    decodeValue: () => ({}), encodeValue: () => new Uint8Array()},
+  createShipSession: () => ({encodeRequest: () => new Uint8Array(), decodeResult: () => ({}),
+    decodeBlock: () => ({}), decodeTraces: () => [], decodeDeltas: () => [], decodeRow: () => ({})}),
+  normalizeDelta: input => ({kind:'passthrough', value:input.value}),
+};
+if (provider.createShipSession({}).decodeTraces(new Uint8Array()) === undefined) throw new Error('Portable protocol declarations failed');
 `);
   // No @types/node dependency is needed by the consumer; declarations must be independently usable.
   execFileSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '--strict',
