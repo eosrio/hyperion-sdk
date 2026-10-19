@@ -58,15 +58,22 @@ must equal the selected profile. The host enforces that binding and controls exe
   must not expose a native decoder handle or convert through a lossy legacy ABI representation.
 - `normalizeDelta(input, context)` receives the decoded value, original bytes, stream and presence
   flag. The host supplies chain/block/ordinal provenance and, when needed, the position-valid ABI
-  deployment. It returns an explicit `passthrough`, an `ignore` with a reason, or a normalized
-  `record` with complete logical identity, record, source, table name and metadata.
+  deployment. It returns an explicit `passthrough`, an `ignore` with a reason, an `abi-required`
+  request, or a normalized `record` with complete logical identity, record, source, table name
+  and metadata.
 
 Normalization must run before downstream handler filtering; unknown required streams/features
 throw instead of silently disappearing. A normalized record's `source.abiDeployment` is mandatory.
 The context's optional deployment exists because some system streams do not use a contract ABI.
-Contract-dependent streams must fail explicitly without their applicable deployment. The host
-owns canonical/fork selection and interval validation; a provider must never substitute the head
-ABI for missing historical metadata. An interval's `from` is inclusive and `until` is exclusive.
+For a contract-dependent stream, a provider can return `{kind: "abi-required", account}` when the
+context has no applicable deployment. The account is the host's contract identifier for lookup;
+it does not replace the record's complete raw physical identity. This keeps protocol-specific
+stream/account extraction inside the provider. The host validates the account, selects a
+position-bound deployment from its canonical view, then invokes normalization once more with that
+deployment. A repeated request when a deployment was supplied must fail, without an unbounded
+retry loop or mutation before binding. Missing historical metadata fails explicitly. The host owns
+canonical/fork selection and interval validation; a provider must never substitute the head ABI.
+An interval's `from` is inclusive and `until` is exclusive.
 
 Complete logical record identity and raw replay metadata remain available independently from a
 backend's physical document ID. The SDK exposes no database operations or native-library classes.

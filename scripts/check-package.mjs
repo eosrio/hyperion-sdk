@@ -24,7 +24,7 @@ try {
   runNpm(['install', '--ignore-scripts', '--no-audit', '--no-fund', tarball], consumer);
   await writeFile(join(consumer, 'consumer.mts'), `
 import { validateComponentManifest, checkCompatibility, type ComponentManifest } from '@eosrio/hyperion-sdk';
-import { validateProtocolSelection, type ProtocolProvider, type ProtocolDescriptor } from '@eosrio/hyperion-sdk/protocol';
+import { validateProtocolSelection, type ProtocolProvider, type ProtocolDescriptor, type ProtocolNormalizedDelta } from '@eosrio/hyperion-sdk/protocol';
 import schema from '@eosrio/hyperion-sdk/component-manifest.schema.json' with { type: 'json' };
 const manifest = { schemaVersion: 1, package: '@example/plugin', version: '0.1.0', kind: 'plugin',
   compatibility: { hyperion: '^4.5.0', sdk: '^0.0.0-dev.1' } } satisfies ComponentManifest;
@@ -46,6 +46,8 @@ const provider: ProtocolProvider<{version:string}> = {
   normalizeDelta: input => ({kind:'passthrough', value:input.value}),
 };
 if (provider.createShipSession({}).decodeTraces(new Uint8Array()) === undefined) throw new Error('Portable protocol declarations failed');
+const lookup: ProtocolNormalizedDelta = {kind:'abi-required', account:'sysio'};
+if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Error('ABI lookup request declaration missing');
 `);
   // No @types/node dependency is needed by the consumer; declarations must be independently usable.
   execFileSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '--strict',

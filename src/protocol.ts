@@ -6,7 +6,7 @@ export interface ProtocolComponent {
   readonly id: string;
   readonly runtime: 'node' | 'rust';
   readonly version: string;
-  /** Exact source commit shared by the coordinated component set. */
+  /** Exact source commit for this component. */
   readonly sourceRevision: string;
   /** SHA-256 of the host-verified artifact or canonical artifact manifest. */
   readonly sha256: string;
@@ -99,6 +99,8 @@ export interface ProtocolNormalizationContext<Abi = unknown> {
 export type ProtocolNormalizedDelta =
   | {kind: 'passthrough'; value: unknown}
   | {kind: 'ignore'; reason: string}
+  /** Request a position-bound deployment lookup before normalization can continue. */
+  | {kind: 'abi-required'; account: string}
   | {kind: 'record'; identity: string; record: unknown; source: ProtocolSource;
     tableName: string; value?: unknown; metadata: Record<string, unknown>};
 
