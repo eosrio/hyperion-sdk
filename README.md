@@ -16,6 +16,8 @@ define package ownership; assigned homes are not implementation or release-suppo
 
 ## Scope
 
+Follow the [shared TypeScript 7 and Bun toolchain policy](https://github.com/eosrio/hyperion-tools/blob/1a38d018cbc25aef3ac35636e11761ef8c9863f3/docs/architecture/hyperion-4.5-typescript-toolchain.md) for development and CI.
+
 - Independently versioned SDK contracts, compatible within each major; breaking contracts require
   a new major.
 - Backend-neutral mutations and logical queries, explicit capabilities and reusable conformance fixtures.
@@ -66,8 +68,11 @@ a real MongoDB adapter. See P05 in the
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
 Run `npm ci`, `npm run typecheck`, `npm test`, `npm run test:package` and `npm run check:docs`.
-Node.js 22 or newer is required; CI exercises Node.js 22 and 24. `npm pack` and Git dependency
-installation build through `prepare`. `private: true` prevents accidental registry publication.
+Development requires Node.js 22 or newer and Bun 1.4.3, pinned in `.bun-version`.
+`npm run typecheck` uses `bun check -p tsconfig.json`; `npm run build` uses TypeScript 7.0.2
+to emit JavaScript and declarations. Keep `npm ci` and the committed npm lockfile for dependency
+installation. CI exercises Node.js 22 and 24 with the pinned Bun checker. `npm pack` and Git
+dependency installation build through `prepare`. `private: true` prevents accidental registry publication.
 These checks cover metadata/protocol selection and a packed ESM/TypeScript consumer. Host execution
 and chain/runtime qualification have their own acceptance evidence.
 Licensed under [MIT](LICENSE).
