@@ -4,8 +4,9 @@ Public extension contracts and TypeScript authoring support for Hyperion protoco
 contract projections, backend adapters and API plugins.
 
 Status: Private development package for Hyperion 4.5, maintained by EOS Rio. This foundation
-implements inert component manifests, declared version checks and portable protocol-provider
-contracts. It provides no projection runtime, database adapter or qualified stable SDK release.
+implements inert component manifests, declared version checks, portable protocol-provider
+contracts and a bounded declarative table projection contract. It provides no projection runtime,
+database adapter or qualified stable SDK release.
 
 Read the [architecture definition](https://github.com/eosrio/hyperion-tools/blob/a36fda12ba813968ce361e85893206d8f5bceb0f/docs/architecture/hyperion-4.5.md),
 [ADRs](https://github.com/eosrio/hyperion-tools/tree/a36fda12ba813968ce361e85893206d8f5bceb0f/docs/adr)
@@ -62,13 +63,22 @@ block-end ABI facts for [History API #213](https://github.com/eosrio/hyperion-hi
 and [SDK #6](https://github.com/eosrio/hyperion-sdk/issues/6). Observations preserve raw bytes and
 source anchors; they do not establish canonical coverage, ABI applicability or projection readiness.
 
+## Portable table projection development API
+
+The additive [table projection contract](docs/projection.md) is the first SDK #1 slice. It supplies
+fixed-ABI declarative field mapping, complete put/delete mutations, contiguous block/checkpoint
+bindings, strict replay identity, capability validation and bounded logical equality/keyset/count
+queries. Import through `@eosrio/hyperion-sdk/projection` or the root. The packaged
+`@eosrio/hyperion-sdk/examples/table-projection` export provides one reusable synthetic example.
+Runtime orchestration and actual native storage/query execution belong to their assigned components.
+
 ## Remaining foundation work
 
 Track [SDK issue #1](https://github.com/eosrio/hyperion-sdk/issues/1) and
 [release coordination #24](https://github.com/eosrio/hyperion-tools/issues/24).
 
-The next implementation target is one declarative contract round-tripping through the SDK and
-a real MongoDB adapter. See P05 in the
+The cross-repository implementation target is one declarative contract round-tripping through the SDK
+and a real MongoDB adapter. SDK-only checks do not establish that outcome. See P05 in the
 [approved issue batch](https://github.com/eosrio/hyperion-tools/blob/a36fda12ba813968ce361e85893206d8f5bceb0f/docs/roadmap/hyperion-4.5-initial-issues.md).
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
@@ -78,6 +88,6 @@ Development requires Node.js 22 or newer and Bun 1.4.3, pinned in `.bun-version`
 to emit JavaScript and declarations. Keep `npm ci` and the committed npm lockfile for dependency
 installation. CI exercises Node.js 22 and 24 with the pinned Bun checker. `npm pack` and Git
 dependency installation build through `prepare`. `private: true` prevents accidental registry publication.
-These checks cover metadata/protocol selection and a packed ESM/TypeScript consumer. Host execution
+These checks cover metadata/protocol selection, portable projection contracts and a packed ESM/TypeScript consumer. Host execution
 and chain/runtime qualification have their own acceptance evidence.
 Licensed under [MIT](LICENSE).

@@ -52,12 +52,15 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
 `);
   await writeFile(join(consumer, 'protocol-abi-observations.mts'),
     await readFile(join(root, 'tests/consumers/protocol-abi-observations.mts'), 'utf8'));
+  await writeFile(join(consumer, 'projection.mts'),
+    await readFile(join(root, 'tests/consumers/projection.mts'), 'utf8'));
   // No @types/node dependency is needed by the consumer; declarations must be independently usable.
   execFileSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '--strict',
     '--target', 'ES2022', '--module', 'NodeNext', '--resolveJsonModule', 'consumer.mts',
-    'protocol-abi-observations.mts'], { cwd: consumer, stdio: 'inherit' });
+    'protocol-abi-observations.mts', 'projection.mts'], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'consumer.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'protocol-abi-observations.mjs')], { cwd: consumer, stdio: 'inherit' });
+  execFileSync(process.execPath, [join(consumer, 'projection.mjs')], { cwd: consumer, stdio: 'inherit' });
   console.log('Packed ESM, JSON Schema and TypeScript consumer passed.');
 } finally {
   await rm(temporary, { recursive: true, force: true });
