@@ -174,6 +174,27 @@ export interface ProtocolAbiFinalStateObservation {
   readonly deltaOrdinal: number;
 }
 
+/** Original stable SHiP sections for native block-one initialization, without mutable head/LIB. */
+export interface ProtocolNativeGenesisInput {
+  /** Exact retained handshake text, including its original formatting. */
+  readonly schemaJson: string;
+  readonly block: Uint8Array;
+  /** The original trace section was absent; encoded empty traces are a different source. */
+  readonly traces: null;
+  readonly deltas: Uint8Array;
+}
+
+/** Detached native initialization facts; no canonical coverage, durability or readiness authority. */
+export interface ProtocolNativeGenesisFacts {
+  readonly schemaVersion: 1;
+  /** Actual header predecessor; it does not replace a null SHiP envelope predecessor. */
+  readonly previousBlockId: string;
+  /** Preserve native ABI bytes, present-empty ABI barriers and original physical row ordinals. */
+  readonly abiStates: readonly ProtocolAbiFinalStateObservation[];
+  /** Verified empty application state for this native initialization, not arbitrary snapshots. */
+  readonly applicationState: 'empty';
+}
+
 /** Detached source facts only: no canonical coverage, durable progress or ABI applicability proof. */
 export interface ProtocolBlockAbiObservations {
   readonly schemaVersion: 1;
@@ -196,6 +217,14 @@ export interface ProtocolProvider<Abi = unknown> {
    * This optional hook does not select an applicable ABI or make a projection ready.
    */
   observeBlockAbi?(input: ProtocolBlockAbiInput, source: ProtocolBlockAbiSource): ProtocolBlockAbiObservations;
+  /**
+   * Verify native block one from retained sections under the selected profile, without mutating
+   * input. Require its zero header predecessor, complete supported physical inventory and absent
+   * traces; missing, malformed or unsupported evidence must throw. Return deterministic detached
+   * facts. The host binds source/profile/components and reruns verification from durable sections
+   * before granting coverage. This optional synchronous hook does not weaken observeBlockAbi.
+   */
+  verifyNativeGenesis?(input: ProtocolNativeGenesisInput, source: ProtocolBlockAbiSource): ProtocolNativeGenesisFacts;
 }
 
 function fail(path: string, message: string, code = 'protocol.invalid-descriptor'): Diagnostic {

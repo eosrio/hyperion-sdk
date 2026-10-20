@@ -148,6 +148,60 @@ Capturing observations alone must not enable action decoding or remove an unavai
 Existing retained Elasticsearch history stays usable; this separate projection does not require
 a full history reindex.
 
+## Verify native genesis from retained sections
+
+The optional synchronous `verifyNativeGenesis(input, source)` hook is the additive contract for
+[SDK #9](https://github.com/eosrio/hyperion-sdk/issues/9) and
+[History API #240](https://github.com/eosrio/hyperion-history-api/issues/240). Existing providers
+remain valid without it; an absent hook means this verification is unsupported. It does not change
+`observeBlockAbi`, SHiP sessions, descriptor validation or projection interfaces. No new metadata
+flag grants support or coverage.
+
+`ProtocolNativeGenesisInput` contains the exact retained `schemaJson` handshake text, original
+`block` and `deltas` sections as `Uint8Array`, and `traces: null` to record an absent trace section.
+The host supplies bounded copies of those durable sections and the original `ProtocolBlockAbiSource`.
+Do not rewrite an absent section as encoded empty traces, require a new whole-frame journal format,
+or change existing capture kinds, digest formulas or source IDs. Mutable frame head/LIB fields are
+outside this input; the host's original ingress still binds the frame and stable sections to its
+admitted selection.
+
+The selected provider must fully consume the sections under the exact supported schema/profile,
+verify native block one with an all-zero actual header predecessor, and check the complete physical
+initialization inventory. Account states retain original physical `deltaOrdinal` values and raw ABI
+bytes. Present accounts with empty ABI bodies remain explicit barriers, including the pinned Wire
+native `sysio.null` and `sysio.prods` accounts. Missing, malformed, partial or unsupported evidence
+must throw, as must a trace section other than `null`. Do not infer completeness at arbitrary
+snapshot heights or fabricate actions, receipts, `setabi` deployments or native-effect anchors.
+
+`ProtocolNativeGenesisFacts` contains `schemaVersion: 1`, the actual header `previousBlockId`,
+readonly `abiStates` reusing `ProtocolAbiFinalStateObservation`, and `applicationState: "empty"`.
+The predecessor must be 64 lowercase zero hexadecimal digits. It is separate from the captured
+SHiP envelope's `source.previousBlockId`, which may remain `null`. `applicationState: "empty"`
+describes verified absence of application KV changes in this supported native initialization;
+it does not establish action inventory or generic snapshot completeness. Returned facts must be
+detached, deterministic and portable. The provider must not mutate input sections or borrow a head ABI.
+
+The host retains the original source trust boundary: the selected reader's verified chain identity,
+canonical selection, exact profile/component pins and section digests remain authoritative inputs.
+For example, Wire v0 deltas omit the initial finalizer key, so these sections cannot independently
+recompute every genesis field or its full digest. This hook adds no hidden operator trust settings
+or claim of independent genesis authentication.
+
+The host journals a dedicated observation discriminator and validated snapshot of the returned
+facts, preserving existing records. During durable reduction it must recheck the admitted source,
+profile/components, schema, capture digest and generation, rerun this hook from the retained sections,
+then validate, snapshot and compare the facts exactly. A saved success assertion, installed method
+or retention metadata alone cannot grant coverage. Unsupported or unavailable evidence remains
+incomplete under host retry/recovery rules. Ordinary later blocks still require their usual traces;
+their missing-input guard is unchanged.
+
+Only the host can admit the verified native ABI states as block-end state and apply an empty
+application-change batch for actual block one using its verified header predecessor. Projection
+initialization remains checkpoint zero with the zero block ID, followed by every contiguous actual
+source block, including blocks without matching changes; see the [projection contract](projection.md).
+Durable effects, progress, source acknowledgment, fork generations and readiness remain host concerns.
+These declarations alone qualify no provider, Node/Rust runtime, worker, API or Wire testnet release.
+
 ## Versioning and evidence
 
 SDK package version, metadata schema version and protocol `interfaceVersion` remain separate.

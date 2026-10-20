@@ -63,6 +63,11 @@ block-end ABI facts for [History API #213](https://github.com/eosrio/hyperion-hi
 and [SDK #6](https://github.com/eosrio/hyperion-sdk/issues/6). Observations preserve raw bytes and
 source anchors; they do not establish canonical coverage, ABI applicability or projection readiness.
 
+The optional `verifyNativeGenesis` hook returns native block-one ABI and empty application-state
+facts from retained sections for [History API #240](https://github.com/eosrio/hyperion-history-api/issues/240)
+and [SDK #9](https://github.com/eosrio/hyperion-sdk/issues/9). The host verifies the selected source and
+reruns the hook before granting coverage; ordinary missing-trace guards remain unchanged.
+
 ## Portable table projection development API
 
 The additive [table projection contract](docs/projection.md) is the first SDK #1 slice. It supplies
