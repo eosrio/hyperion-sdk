@@ -2,24 +2,27 @@
   "name": "@eosrio/hyperion-sdk",
   "version": "0.0.0-dev.1",
   "private": true,
-  "description": "Development metadata contracts for Hyperion extensions",
+  "description": "Development metadata and portable protocol contracts for Hyperion extensions",
   "license": "MIT",
   "type": "module",
   "engines": { "node": ">=22" },
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./protocol": { "types": "./dist/protocol.d.ts", "import": "./dist/protocol.js" },
+    "./projection": { "types": "./dist/projection.d.ts", "import": "./dist/projection.js" },
+    "./examples/table-projection": { "types": "./dist/examples/table-projection.d.ts", "import": "./dist/examples/table-projection.js" },
     "./component-manifest.schema.json": "./dist/component-manifest.schema.json"
   },
   "files": ["dist/", "docs/", "src/component-manifest.schema.json", "README.md", "LICENSE"],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test tests/manifest.test.mjs tests/compatibility.test.mjs",
+    "typecheck": "bun check -p tsconfig.json",
+    "test": "npm run build && node --test tests/manifest.test.mjs tests/compatibility.test.mjs tests/protocol.test.mjs tests/projection.test.mjs",
     "test:package": "node scripts/check-package.mjs",
     "check:docs": "python scripts/check-docs.py",
     "prepare": "npm run build"
   },
   "repository": { "type": "git", "url": "git+https://github.com/eosrio/hyperion-sdk.git" },
   "dependencies": { "ajv": "8.20.0", "semver": "7.8.5" },
-  "devDependencies": { "@types/semver": "7.8.0", "typescript": "5.9.3" }
+  "devDependencies": { "@types/semver": "7.8.0", "typescript": "7.0.2" }
 }
