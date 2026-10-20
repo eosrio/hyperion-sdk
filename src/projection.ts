@@ -59,6 +59,20 @@ export interface ProjectionReadView {
   /** Completed progress context; open/query separately enforce current serving readiness. */
   readonly checkpoint: ProjectionCheckpoint;
 }
+/** Durable source retry identity. A digest is opaque backend-neutral batch evidence. */
+export interface ProjectionPendingSource {
+  readonly block: ProjectionBlock;
+  readonly digest: string | null;
+  readonly reason: string | null;
+}
+/** Recovery inspection is progress evidence only; it is never a serving/readiness grant. */
+export interface ProjectionRecoveryView {
+  readonly binding: ProjectionBinding;
+  readonly checkpoint: ProjectionCheckpoint;
+  readonly initialized: boolean;
+  readonly pending: ProjectionPendingSource | null;
+  readonly gap: ProjectionPendingSource | null;
+}
 export type ProjectionMutation =
   | {readonly kind: 'put'; readonly key: string; readonly value: ProjectionRecord}
   | {readonly kind: 'delete'; readonly key: string};
@@ -123,6 +137,14 @@ export interface ProjectionAdapter {
   initialize(definition: ProjectionDefinition, binding: ProjectionBinding,
     genesis: ProjectionCheckpoint): Promise<ProjectionReadView>;
   open(binding: ProjectionBinding): Promise<ProjectionReadView>;
+  /**
+   * Optional additive inspection for production schedulers. Validate binding/storage integrity
+   * and return a detached durable snapshot even when pending work fences open/query. The next
+   * source is checkpoint + 1; pending/gap identities constrain exact recovery. Missing storage,
+   * corrupt metadata and unavailable durable reads must fail, never return invented progress.
+   * Hosts requiring restart recovery reject adapters without this method before activation.
+   */
+  recovery?(binding: ProjectionBinding): Promise<ProjectionRecoveryView>;
   apply(request: ProjectionApplyRequest): Promise<ProjectionApplyResult>;
   markIncomplete(binding: ProjectionBinding, failedBlock: ProjectionBlock, reason: string): Promise<void>;
   query(view: ProjectionReadView, query: ProjectionQuery): Promise<ProjectionQueryResult>;

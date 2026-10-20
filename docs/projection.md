@@ -45,6 +45,16 @@ instance without publishing a serving view. Other identity, corruption or storag
 errors cannot be swallowed as this recovery case. `open` and queries remain unavailable until
 successful recovery of the exact failed source.
 
+Production schedulers may require the optional `recovery(binding)` method before activation.
+It returns a detached durable `ProjectionRecoveryView` containing the validated binding,
+completed checkpoint, initialization status and any pending application or observed future
+gap (exact source block, opaque mutation digest and bounded failure reason). This additive
+method preserves compatibility with existing adapters. An adapter must validate storage and
+binding integrity before returning it; missing storage or unavailable reads fail explicitly.
+The scheduler resumes at checkpoint plus one and retries the original pending source. It
+must not replay from block zero beyond retained receipts or treat this inspection as a read
+view: `open`/`query` and the host's canonical coverage checks still govern serving readiness.
+
 The runtime must provide every contiguous source block starting with block one, including blocks
 that contain no matching row changes. `previous` is exactly `{blockNum: block.blockNum - 1,
 blockId: block.previousBlockId}`. This can be reconstructed for an old redelivery after newer
