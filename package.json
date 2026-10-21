@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "bun check -p tsconfig.json",
-    "test": "npm run build && node --test tests/manifest.test.mjs tests/compatibility.test.mjs tests/protocol.test.mjs tests/projection.test.mjs",
+    "test": "npm run build && node --test tests/manifest.test.mjs tests/compatibility.test.mjs tests/protocol.test.mjs tests/projection.test.mjs tests/projection-rollback.test.mjs",
     "test:package": "node scripts/check-package.mjs",
     "check:docs": "python scripts/check-docs.py",
     "prepare": "npm run build"
