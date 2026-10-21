@@ -82,6 +82,10 @@ bounded undo coverage and resumable runtime-coordinated recovery for SDK #14 and
 v1 consumers remain unchanged. Database and process-restart qualification belongs to the real adapter
 and runtime fixtures, not these SDK-only checks.
 
+The additive [retained-checkpoint inspection](docs/projection-recovery.md) lets a host inspect the
+adapter's bounded applied branch under its current revision. Its separate capability manifest
+leaves both existing interfaces unchanged. Inspection supplies no canonical or serving authority.
+
 ## Remaining foundation work
 
 Track [SDK issue #1](https://github.com/eosrio/hyperion-sdk/issues/1) and

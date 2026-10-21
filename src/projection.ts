@@ -265,6 +265,37 @@ export interface ProjectionRollbackAdapter {
   query(view: ProjectionRollbackReadView, query: ProjectionQuery): Promise<ProjectionRollbackQueryResult>;
 }
 
+/** Additive inspection; neither the v1 nor the v2 capability manifest is widened. */
+export const PROJECTION_RECOVERY_CAPABILITIES = Object.freeze(['retained-checkpoints'] as const);
+export interface ProjectionRecoveryCapabilities {
+  readonly interfaceVersion: 1;
+  readonly supported: readonly typeof PROJECTION_RECOVERY_CAPABILITIES[number][];
+}
+export interface ProjectionRecoveryActivation extends ProjectionRollbackActivation {
+  readonly recoveryCapabilities: ProjectionRecoveryCapabilities;
+}
+export interface ProjectionRetainedCheckpointRequest {
+  readonly binding: ProjectionBinding;
+  /** Inspection must observe this exact persisted writer fence. */
+  readonly revision: string;
+}
+export interface ProjectionRetainedCheckpointView {
+  readonly recovery: ProjectionRollbackRecoveryView;
+  /** Exact applied-branch identities, descending from checkpoint through coverage.floor inclusive. */
+  readonly checkpoints: readonly ProjectionCheckpoint[];
+}
+/**
+ * Optional bounded applied-branch inspection for a host selecting a canonical rollback ancestor.
+ * Validate the binding/revision before native I/O and derive both result members from one validated
+ * durable metadata snapshot. Return detached frozen data even when incomplete or rolling back.
+ * Stale revisions fail with projection.stale-revision. This is not canonical evidence or a serving
+ * readiness grant, and it never exposes native storage, undo descriptors or before-images.
+ */
+export interface ProjectionRecoveryAdapter extends ProjectionRollbackAdapter {
+  readonly recoveryCapabilities: ProjectionRecoveryCapabilities;
+  retainedCheckpoints(request: ProjectionRetainedCheckpointRequest): Promise<ProjectionRetainedCheckpointView>;
+}
+
 export type ProjectionErrorCode =
   | 'projection.invalid-contract' | 'projection.capability-unavailable'
   | 'projection.not-initialized' | 'projection.incomplete' | 'projection.stale-view'
@@ -736,6 +767,75 @@ export function validateProjectionRollbackRecovery(input: unknown): ProjectionVa
     }
     if (!value.initialized) check(checkpoint.blockNum === 0 && value.pending === null && value.gap === null
       && value.rollback === null, '/initialized', 'Uninitialized recovery cannot contain applied or pending source work');
+  });
+}
+
+/** Independently activate inspection while preserving the exact existing rollback contract. */
+export function validateProjectionRecoveryActivation(definition: unknown, binding: unknown,
+  capabilities: unknown, recoveryCapabilities: unknown): ProjectionValidationResult<ProjectionRecoveryActivation> {
+  return validating({definition, binding, capabilities, recoveryCapabilities}, copy => {
+    const value = record(copy, '');
+    const rollback = validateProjectionRollbackActivation(value.definition, value.binding, value.capabilities);
+    if (!rollback.valid) {
+      const error = rollback.errors[0]!;
+      fail(error.path, error.message, error.code);
+    }
+    const caps = record(value.recoveryCapabilities, '/recoveryCapabilities');
+    keys(caps, ['interfaceVersion', 'supported'], [], '/recoveryCapabilities');
+    check(caps.interfaceVersion === 1 && Array.isArray(caps.supported)
+      && caps.supported.length <= PROJECTION_RECOVERY_CAPABILITIES.length,
+    '/recoveryCapabilities', 'Expected projection recovery capability interfaceVersion 1');
+    const seen = new Set<string>();
+    for (const [i, supported] of caps.supported.entries()) {
+      check(typeof supported === 'string' && (PROJECTION_RECOVERY_CAPABILITIES as readonly string[]).includes(supported),
+        `/recoveryCapabilities/supported/${i}`, 'Unknown capability');
+      check(!seen.has(supported), `/recoveryCapabilities/supported/${i}`, 'Duplicate capability');
+      seen.add(supported);
+    }
+    for (const required of PROJECTION_RECOVERY_CAPABILITIES) if (!seen.has(required)) {
+      fail('/recoveryCapabilities/supported', `Adapter does not support required capability ${required}`, 'projection.capability-unavailable');
+    }
+  });
+}
+
+export function validateProjectionRetainedCheckpointRequest(input: unknown): ProjectionValidationResult<ProjectionRetainedCheckpointRequest> {
+  return validating(input, copy => {
+    const value = record(copy, '');
+    keys(value, ['binding', 'revision']);
+    bindingShape(value.binding, undefined, '/binding');
+    hash(value.revision, '/revision');
+  });
+}
+
+/** Capture a bounded metadata-only path; its canonicality remains the host's responsibility. */
+export function validateProjectionRetainedCheckpoints(input: unknown): ProjectionValidationResult<ProjectionRetainedCheckpointView> {
+  return validating(input, copy => {
+    const value = record(copy, '');
+    keys(value, ['recovery', 'checkpoints']);
+    const recovery = validateProjectionRollbackRecovery(value.recovery);
+    if (!recovery.valid) {
+      const error = recovery.errors[0]!;
+      fail(`/recovery${error.path}`, error.message, error.code);
+    }
+    const {checkpoint, coverage} = recovery.value;
+    check(Array.isArray(value.checkpoints) && value.checkpoints.length >= 1
+      && value.checkpoints.length <= PROJECTION_ROLLBACK_LIMITS.retainedBlocks + 1,
+    '/checkpoints', 'Expected a bounded nonempty retained checkpoint path');
+    check(value.checkpoints.length === coverage.retainedBlocks + 1,
+      '/checkpoints', 'Retained checkpoint count must include every retained block and its floor');
+    const identities = new Set<string>();
+    for (const [i, inputPoint] of value.checkpoints.entries()) {
+      const path = `/checkpoints/${i}`;
+      checkpointShape(inputPoint, path);
+      const point = inputPoint as ProjectionCheckpoint;
+      check(point.blockNum === checkpoint.blockNum - i, path, 'Retained checkpoints must descend contiguously');
+      check(!identities.has(point.blockId), `${path}/blockId`, 'Duplicate retained block identity');
+      identities.add(point.blockId);
+    }
+    check(sameCheckpoint(value.checkpoints[0] as ProjectionCheckpoint, checkpoint),
+      '/checkpoints/0', 'Retained path must start at the recovery checkpoint');
+    check(sameCheckpoint(value.checkpoints[value.checkpoints.length - 1] as ProjectionCheckpoint, coverage.floor),
+      '/checkpoints', 'Retained path must end at the recovery coverage floor');
   });
 }
 
