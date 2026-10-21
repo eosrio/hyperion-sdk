@@ -115,8 +115,9 @@ before returning a response.
 
 The adapter owns native read isolation and final checkpoint validation. The shared runtime owns
 source coverage, ordering, failure isolation, initialization orchestration and eventual canonical
-fork coordination. This fixed-generation slice does not implement rollback or authorize serving
-last-valid state after a failure.
+fork coordination. The separate opt-in [rollback contract](projection-rollback.md) adds fenced
+recovery without changing this v1 interface. Neither contract authorizes serving last-valid state
+after a failure.
 
 ## Bounded logical queries
 
