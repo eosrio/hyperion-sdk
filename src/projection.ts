@@ -722,6 +722,9 @@ export function validateProjectionRollbackRecovery(input: unknown): ProjectionVa
       if (rollback.status === 'unavailable') string(rollback.reason, '/rollback/reason', 4096);
       else check(rollback.reason === null, '/rollback/reason', 'Only unavailable recovery carries a failure reason');
       if (rollback.status === 'running') {
+        check(ancestor.blockNum >= floor.blockNum
+          && (ancestor.blockNum !== floor.blockNum || sameCheckpoint(ancestor, floor)),
+        '/rollback/ancestor', 'Running rollback ancestor is outside the retained recovery coverage');
         check(checkpoint.blockNum >= ancestor.blockNum && checkpoint.blockNum <= from.blockNum,
           '/checkpoint', 'Running rollback checkpoint is outside its source range');
         if (checkpoint.blockNum === from.blockNum) check(sameCheckpoint(checkpoint, from), '/checkpoint', 'Rollback start identity differs');

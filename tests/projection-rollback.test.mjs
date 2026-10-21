@@ -166,6 +166,34 @@ test('running and completed rollback receipts preserve original operation identi
   }
 });
 
+test('running undo needs a covered exact ancestor while completed and unavailable receipts retain older targets', () => {
+  const input = recovery();
+  input.revision = nextRevision;
+  input.coverage.floor = point(2); input.coverage.retainedBlocks = 1;
+  input.rollback = {operationId: 'fork-operation-1', sourceRevision: revision, from: point(3),
+    ancestor: point(1), status: 'running', reason: null};
+  invalid(validateProjectionRollbackRecovery(input));
+  input.rollback.ancestor = {...point(2), blockId: 'f'.repeat(64)};
+  invalid(validateProjectionRollbackRecovery(input));
+  input.rollback.ancestor = point(2);
+  valid(validateProjectionRollbackRecovery(input));
+
+  // A replacement branch may prune its window past the last completed operation's ancestor.
+  const completed = structuredClone(input);
+  completed.rollback.status = 'complete'; completed.rollback.ancestor = point(1);
+  completed.checkpoint = {...point(4), blockId: 'f'.repeat(64)};
+  completed.coverage.floor = {...point(3), blockId: 'e'.repeat(64)};
+  valid(validateProjectionRollbackRecovery(completed));
+
+  // Unavailable intent must still describe the exact uncovered request which made it incomplete.
+  const unavailable = structuredClone(input);
+  unavailable.rollback.status = 'unavailable'; unavailable.rollback.ancestor = point(1);
+  unavailable.rollback.reason = 'Requested ancestor is older than retained coverage';
+  valid(validateProjectionRollbackRecovery(unavailable));
+  unavailable.rollback.ancestor = {...point(2), blockId: 'f'.repeat(64)};
+  valid(validateProjectionRollbackRecovery(unavailable));
+});
+
 test('recovery source markers preserve exact next-block and observed future-gap identity', () => {
   const input = recovery();
   input.pending = {block: {...point(4), previousBlockId: input.checkpoint.blockId}, digest: 'd'.repeat(64), reason: 'pending'};
