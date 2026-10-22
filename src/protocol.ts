@@ -1,5 +1,7 @@
 import {valid} from 'semver';
 import {checkCompatibility, type CompatibilityEnvironment, type ComponentManifest, type Diagnostic} from './manifest.js';
+import type {ProtocolNativeActionRequirement, ProtocolNativeActions} from './protocol-native-actions.js';
+export * from './protocol-native-actions.js';
 
 /** Exact, inert artifact pin. An installed component is evidence of availability, not qualification. */
 export interface ProtocolComponent {
@@ -16,6 +18,8 @@ export interface ProtocolProfile {
   readonly id: string;
   /** The coordinated component set required by this profile, including offline consumers. */
   readonly components: readonly ProtocolComponent[];
+  /** Optional required capability; omission preserves the existing contract-only interface. */
+  readonly nativeActions?: ProtocolNativeActionRequirement;
 }
 
 /** Read this JSON descriptor before importing an executable provider entry point. */
@@ -30,6 +34,8 @@ export interface ProtocolSelection {
   readonly environment: CompatibilityEnvironment;
   /** Installed artifacts discovered by the host without importing their executable entry points. */
   readonly components: readonly ProtocolComponent[];
+  /** Explicit host support. Omission supports no native action interface. */
+  readonly nativeActionInterfaceVersions?: readonly number[];
 }
 
 export type ProtocolSelectionResult =
@@ -207,6 +213,7 @@ export interface ProtocolBlockAbiObservations {
 export interface ProtocolProvider<Abi = unknown> {
   readonly profileId: string;
   readonly contractCodec: ProtocolContractCodec<Abi>;
+  readonly nativeActions?: ProtocolNativeActions;
   createShipSession(handshake: unknown): ProtocolShipSession;
   /** Unknown required streams/features must throw; ignoring a known stream requires a reason. */
   normalizeDelta(input: ProtocolDeltaInput, context: ProtocolNormalizationContext<Abi>): ProtocolNormalizedDelta;
@@ -321,9 +328,15 @@ export function validateProtocolSelection(descriptor: unknown, selection: unknow
     || descriptor.interfaceVersion !== 1) {
     return {valid: false, errors: [fail('/descriptor', 'Expected protocol descriptor interfaceVersion 1')]};
   }
-  if (!record(selection) || !keys(selection, ['profileId', 'environment', 'components'])
+  if (!record(selection) || !keys(selection, ['profileId', 'environment', 'components', 'nativeActionInterfaceVersions'])
     || typeof selection.profileId !== 'string' || !identifier.test(selection.profileId)) {
     return {valid: false, errors: [fail('/selection', 'Expected a selected profile, environment and installed components')]};
+  }
+  const nativeVersions = Object.hasOwn(selection, 'nativeActionInterfaceVersions') ? selection.nativeActionInterfaceVersions : [];
+  if (!Array.isArray(nativeVersions) || nativeVersions.length > 16
+    || nativeVersions.some(version => !Number.isSafeInteger(version) || version < 1 || version > 65535)
+    || new Set(nativeVersions).size !== nativeVersions.length) {
+    errors.push(fail('/selection/nativeActionInterfaceVersions', 'Expected at most 16 distinct positive uint16 interface versions'));
   }
   const compatibility = checkCompatibility(descriptor.manifest, selection.environment);
   errors.push(...compatibility.errors.map(error => ({...error,
@@ -338,19 +351,34 @@ export function validateProtocolSelection(descriptor: unknown, selection: unknow
     const ids = new Set<string>();
     for (const [index, profile] of descriptor.profiles.entries()) {
       const path = `/descriptor/profiles/${index}`;
-      if (!record(profile) || !keys(profile, ['id', 'components']) || typeof profile.id !== 'string' || !identifier.test(profile.id)) {
+      if (!record(profile) || !keys(profile, ['id', 'components', 'nativeActions']) || typeof profile.id !== 'string' || !identifier.test(profile.id)) {
         errors.push(fail(path, 'Expected a profile identifier and coordinated components'));
         continue;
       }
       if (ids.has(profile.id)) errors.push(fail(`${path}/id`, 'Duplicate profile identifier', 'protocol.duplicate-profile'));
       ids.add(profile.id);
       const pins = components(profile.components, `${path}/components`, errors);
-      if (pins) profiles.push(Object.freeze({id: profile.id, components: Object.freeze(pins)}));
+      let nativeActions: ProtocolNativeActionRequirement | undefined;
+      if (Object.hasOwn(profile, 'nativeActions')) {
+        const requirement = profile.nativeActions;
+        if (!record(requirement) || !keys(requirement, ['interfaceVersion']) || !Object.hasOwn(requirement, 'interfaceVersion')) {
+          errors.push(fail(`${path}/nativeActions`, 'Expected an inert native action interface requirement'));
+        } else if (requirement.interfaceVersion !== 1) {
+          errors.push(fail(`${path}/nativeActions/interfaceVersion`, 'Unsupported native action interface version',
+            'protocol.unsupported-native-interface'));
+        } else nativeActions = Object.freeze({interfaceVersion: 1});
+      }
+      if (pins) profiles.push(Object.freeze({id: profile.id, components: Object.freeze(pins),
+        ...(nativeActions ? {nativeActions} : {})}));
     }
   }
   const installed = components(selection.components, '/selection/components', errors);
   const profile = profiles.find(profile => profile.id === selection.profileId);
   if (!profile) errors.push(fail('/selection/profileId', 'Selected profile is not declared by this package', 'protocol.unknown-profile'));
+  if (profile?.nativeActions && (!Array.isArray(nativeVersions) || !nativeVersions.includes(profile.nativeActions.interfaceVersion))) {
+    errors.push(fail('/selection/nativeActionInterfaceVersions', 'Selected profile requires explicit host support for native actions interface 1',
+      'protocol.unsupported-native-interface'));
+  }
   if (profile && installed) for (const required of profile.components) {
     const found = installed.find(entry => entry.id === required.id && entry.runtime === required.runtime);
     if (!found) errors.push(fail('/selection/components', `Missing ${required.runtime} component ${required.id}`, 'protocol.missing-component'));

@@ -52,6 +52,8 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
 `);
   await writeFile(join(consumer, 'protocol-abi-observations.mts'),
     await readFile(join(root, 'tests/consumers/protocol-abi-observations.mts'), 'utf8'));
+  await writeFile(join(consumer, 'protocol-native-actions.mts'),
+    await readFile(join(root, 'tests/consumers/protocol-native-actions.mts'), 'utf8'));
   await writeFile(join(consumer, 'projection.mts'),
     await readFile(join(root, 'tests/consumers/projection.mts'), 'utf8'));
   await writeFile(join(consumer, 'projection-rollback.mts'),
@@ -61,9 +63,10 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
   // No @types/node dependency is needed by the consumer; declarations must be independently usable.
   execFileSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '--strict',
     '--target', 'ES2022', '--module', 'NodeNext', '--resolveJsonModule', 'consumer.mts',
-    'protocol-abi-observations.mts', 'projection.mts', 'projection-rollback.mts', 'projection-recovery.mts'], { cwd: consumer, stdio: 'inherit' });
+    'protocol-abi-observations.mts', 'protocol-native-actions.mts', 'projection.mts', 'projection-rollback.mts', 'projection-recovery.mts'], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'consumer.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'protocol-abi-observations.mjs')], { cwd: consumer, stdio: 'inherit' });
+  execFileSync(process.execPath, [join(consumer, 'protocol-native-actions.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'projection.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'projection-rollback.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'projection-recovery.mjs')], { cwd: consumer, stdio: 'inherit' });
