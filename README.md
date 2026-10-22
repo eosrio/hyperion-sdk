@@ -77,6 +77,15 @@ queries. Import through `@eosrio/hyperion-sdk/projection` or the root. The packa
 `@eosrio/hyperion-sdk/examples/table-projection` export provides one reusable synthetic example.
 Runtime orchestration and actual native storage/query execution belong to their assigned components.
 
+The separate opt-in [rollback contract](docs/projection-rollback.md) adds fenced reads/writes,
+bounded undo coverage and resumable runtime-coordinated recovery for SDK #14 and Tools #21. Existing
+v1 consumers remain unchanged. Database and process-restart qualification belongs to the real adapter
+and runtime fixtures, not these SDK-only checks.
+
+The additive [retained-checkpoint inspection](docs/projection-recovery.md) lets a host inspect the
+adapter's bounded applied branch under its current revision. Its separate capability manifest
+leaves both existing interfaces unchanged. Inspection supplies no canonical or serving authority.
+
 ## Remaining foundation work
 
 Track [SDK issue #1](https://github.com/eosrio/hyperion-sdk/issues/1) and

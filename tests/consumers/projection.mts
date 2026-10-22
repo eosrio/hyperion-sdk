@@ -1,7 +1,7 @@
 import {PROJECTION_CAPABILITIES, canonicalProjectionBatch, validateProjectionActivation,
   validateProjectionApply, validateProjectionQuery, validateProjectionQueryInput,
   type ProjectionAdapter, type ProjectionApplyResult, type ProjectionReadView,
-  type ProjectionQueryResult} from '@eosrio/hyperion-sdk/projection';
+  type ProjectionQueryResult, type ProjectionRecoveryView} from '@eosrio/hyperion-sdk/projection';
 import {validateProjectionDefinition} from '@eosrio/hyperion-sdk';
 import {exampleTableDefinition, createTableProjectionExample} from '@eosrio/hyperion-sdk/examples/table-projection';
 
@@ -25,6 +25,13 @@ async function consume(adapter: ProjectionAdapter): Promise<ProjectionQueryResul
   const initial: ProjectionReadView = await adapter.initialize(selected.valid ? selected.value.definition : exampleTableDefinition,
     binding, example.genesis);
   await adapter.open(initial.binding);
+  if (adapter.recovery) {
+    const recovery: ProjectionRecoveryView = await adapter.recovery(binding);
+    if (recovery.binding.projectionId !== binding.projectionId || !recovery.initialized) throw new Error('Invalid recovery identity');
+    // Inspection never replaces the separate serving open/query checks below.
+    if (recovery.pending?.block.blockNum !== undefined && recovery.pending.block.blockNum <= recovery.checkpoint.blockNum)
+      throw new Error('Pending source must follow completed progress');
+  }
   let result: ProjectionApplyResult | undefined;
   for (const request of example.requests) result = await adapter.apply(request);
   if (!result) throw new Error('Example has no source block');

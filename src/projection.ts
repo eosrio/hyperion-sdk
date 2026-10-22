@@ -59,6 +59,20 @@ export interface ProjectionReadView {
   /** Completed progress context; open/query separately enforce current serving readiness. */
   readonly checkpoint: ProjectionCheckpoint;
 }
+/** Durable source retry identity. A digest is opaque backend-neutral batch evidence. */
+export interface ProjectionPendingSource {
+  readonly block: ProjectionBlock;
+  readonly digest: string | null;
+  readonly reason: string | null;
+}
+/** Recovery inspection is progress evidence only; it is never a serving/readiness grant. */
+export interface ProjectionRecoveryView {
+  readonly binding: ProjectionBinding;
+  readonly checkpoint: ProjectionCheckpoint;
+  readonly initialized: boolean;
+  readonly pending: ProjectionPendingSource | null;
+  readonly gap: ProjectionPendingSource | null;
+}
 export type ProjectionMutation =
   | {readonly kind: 'put'; readonly key: string; readonly value: ProjectionRecord}
   | {readonly kind: 'delete'; readonly key: string};
@@ -116,30 +130,186 @@ export interface ProjectionActivation {
  * readiness. A failed-contract/applying marker requires exact same-source recovery. A durable future
  * source-gap marker allows contiguous missing blocks to complete while queries remain unavailable
  * until the observed target source (and any known batch digest) is successfully replayed.
- * Fork rollback, live activation and arbitrary hooks are later contracts.
+ * Fork rollback uses the separate opt-in interface below; live activation and arbitrary hooks
+ * remain later contracts.
  */
 export interface ProjectionAdapter {
   readonly capabilities: ProjectionAdapterCapabilities;
   initialize(definition: ProjectionDefinition, binding: ProjectionBinding,
     genesis: ProjectionCheckpoint): Promise<ProjectionReadView>;
   open(binding: ProjectionBinding): Promise<ProjectionReadView>;
+  /**
+   * Optional additive inspection for production schedulers. Validate binding/storage integrity
+   * and return a detached durable snapshot even when pending work fences open/query. The next
+   * source is checkpoint + 1; pending/gap identities constrain exact recovery. Missing storage,
+   * corrupt metadata and unavailable durable reads must fail, never return invented progress.
+   * Hosts requiring restart recovery reject adapters without this method before activation.
+   */
+  recovery?(binding: ProjectionBinding): Promise<ProjectionRecoveryView>;
   apply(request: ProjectionApplyRequest): Promise<ProjectionApplyResult>;
   markIncomplete(binding: ProjectionBinding, failedBlock: ProjectionBlock, reason: string): Promise<void>;
   query(view: ProjectionReadView, query: ProjectionQuery): Promise<ProjectionQueryResult>;
+}
+
+/** Explicitly opted-in recovery interface; the existing v1 capability baseline is unchanged. */
+export const PROJECTION_ROLLBACK_CAPABILITIES = Object.freeze([
+  ...PROJECTION_CAPABILITIES, 'fork-rollback',
+] as const);
+export type ProjectionRollbackCapability = typeof PROJECTION_ROLLBACK_CAPABILITIES[number];
+export const PROJECTION_ROLLBACK_LIMITS = Object.freeze({
+  maxSteps: 256, retainedBlocks: 4096, retainedBytes: 1073741824,
+});
+export interface ProjectionRollbackAdapterCapabilities {
+  readonly interfaceVersion: 2;
+  readonly supported: readonly ProjectionRollbackCapability[];
+}
+export interface ProjectionRollbackActivation {
+  readonly definition: ProjectionDefinition;
+  readonly binding: ProjectionBinding;
+  readonly capabilities: ProjectionRollbackAdapterCapabilities;
+}
+export interface ProjectionRollbackReadView extends ProjectionReadView {
+  /** Opaque persisted fence, separate from the immutable binding generation. */
+  readonly revision: string;
+}
+export interface ProjectionRollbackCoverage {
+  /** Oldest exact ancestor reachable using the actually retained contiguous undo window. */
+  readonly floor: ProjectionCheckpoint;
+  readonly retainedBlocks: number;
+  /** Adapter-documented encoded undo bytes, including block descriptors. */
+  readonly retainedBytes: number;
+  readonly maxBlocks: number;
+  readonly maxBytes: number;
+}
+export interface ProjectionRollbackState {
+  readonly operationId: string;
+  /** Fence supplied when this recovery operation was first admitted. */
+  readonly sourceRevision: string;
+  readonly from: ProjectionCheckpoint;
+  readonly ancestor: ProjectionCheckpoint;
+  readonly status: 'running' | 'complete' | 'unavailable';
+  readonly reason: string | null;
+}
+/** Inspection is never a serving grant, including after a completed rollback operation. */
+export interface ProjectionRollbackRecoveryView extends ProjectionRecoveryView {
+  readonly revision: string;
+  readonly coverage: ProjectionRollbackCoverage;
+  /** Includes the last completed operation so a lost response cannot repeat its effects. */
+  readonly rollback: ProjectionRollbackState | null;
+}
+export interface ProjectionRollbackApplyRequest {
+  readonly revision: string;
+  readonly batch: ProjectionApplyRequest;
+}
+export interface ProjectionRollbackApplyResult {
+  readonly status: 'applied' | 'duplicate';
+  readonly view: ProjectionRollbackReadView;
+}
+export interface ProjectionRollbackIncompleteRequest {
+  readonly binding: ProjectionBinding;
+  readonly revision: string;
+  readonly block: ProjectionBlock;
+  readonly reason: string;
+}
+export interface ProjectionRollbackRequest {
+  readonly binding: ProjectionBinding;
+  readonly revision: string;
+  readonly operationId: string;
+  /** Exact expected completed checkpoint when admitting a new operation. */
+  readonly from: ProjectionCheckpoint;
+  readonly ancestor: ProjectionCheckpoint;
+  /** Per-call work budget, excluded from the durable operation identity. */
+  readonly maxBlocks: number;
+}
+export interface ProjectionRollbackResult {
+  readonly status: 'in-progress' | 'rolled-back' | 'duplicate';
+  readonly recovery: ProjectionRollbackRecoveryView;
+}
+export interface ProjectionRollbackQueryResult {
+  readonly view: ProjectionRollbackReadView;
+  readonly rows: ProjectionQueryResult['rows'];
+  readonly nextAfterKey?: string;
+  readonly count?: {readonly value: number; readonly exact: boolean};
+}
+/**
+ * Separate opt-in interface: existing v1 objects and validators keep their exact contract.
+ * Activating this interface on existing storage durably rejects unfenced v1 access to that instance;
+ * it never invents inverse effects for previously applied blocks. Coverage starts at the actual
+ * completed checkpoint. Every state-changing operation, including failure/source-gap admission,
+ * checks the caller's revision. open/query require a matching revision and exact checkpoint.
+ *
+ * The runtime selects canonical ancestry, quiesces its local owner and supplies a stable operation
+ * ID. Before undo starts, the adapter durably rotates the revision and records the exact operation,
+ * fencing all earlier writers/read views. Each rollback call undoes at most maxBlocks complete
+ * source blocks, preserving effects/checkpoint/undo progress atomically. Exact original-operation
+ * retries resume with its sourceRevision; a completed retry returns duplicate without undoing a
+ * subsequently applied replacement branch. A later recovery may supersede the retained operation
+ * receipt; an older request then fails its revision check, never starts again implicitly.
+ *
+ * An exact ancestor equal to from may cancel orphan pending/gap work and rotate the revision even
+ * when no effects need undo. Wrong branch identity or unavailable older coverage durably leaves the
+ * affected instance incomplete before throwing projection.rollback-unavailable. Unavailable undo
+ * is not permission to skip effects or advance completed progress. Historical replay/reinitialization
+ * requires separately qualified sources. initialize/open/query do not expose partial rollback state.
+ * Native undo layout and durability execution belong to adapters, not projection plugins.
+ */
+export interface ProjectionRollbackAdapter {
+  readonly capabilities: ProjectionRollbackAdapterCapabilities;
+  initialize(definition: ProjectionDefinition, binding: ProjectionBinding,
+    genesis: ProjectionCheckpoint): Promise<ProjectionRollbackReadView>;
+  open(binding: ProjectionBinding): Promise<ProjectionRollbackReadView>;
+  recovery(binding: ProjectionBinding): Promise<ProjectionRollbackRecoveryView>;
+  apply(request: ProjectionRollbackApplyRequest): Promise<ProjectionRollbackApplyResult>;
+  markIncomplete(request: ProjectionRollbackIncompleteRequest): Promise<void>;
+  rollback(request: ProjectionRollbackRequest): Promise<ProjectionRollbackResult>;
+  query(view: ProjectionRollbackReadView, query: ProjectionQuery): Promise<ProjectionRollbackQueryResult>;
+}
+
+/** Additive inspection; neither the v1 nor the v2 capability manifest is widened. */
+export const PROJECTION_RECOVERY_CAPABILITIES = Object.freeze(['retained-checkpoints'] as const);
+export interface ProjectionRecoveryCapabilities {
+  readonly interfaceVersion: 1;
+  readonly supported: readonly typeof PROJECTION_RECOVERY_CAPABILITIES[number][];
+}
+export interface ProjectionRecoveryActivation extends ProjectionRollbackActivation {
+  readonly recoveryCapabilities: ProjectionRecoveryCapabilities;
+}
+export interface ProjectionRetainedCheckpointRequest {
+  readonly binding: ProjectionBinding;
+  /** Inspection must observe this exact persisted writer fence. */
+  readonly revision: string;
+}
+export interface ProjectionRetainedCheckpointView {
+  readonly recovery: ProjectionRollbackRecoveryView;
+  /** Exact applied-branch identities, descending from checkpoint through coverage.floor inclusive. */
+  readonly checkpoints: readonly ProjectionCheckpoint[];
+}
+/**
+ * Optional bounded applied-branch inspection for a host selecting a canonical rollback ancestor.
+ * Validate the binding/revision before native I/O and derive both result members from one validated
+ * durable metadata snapshot. Return detached frozen data even when incomplete or rolling back.
+ * Stale revisions fail with projection.stale-revision. This is not canonical evidence or a serving
+ * readiness grant, and it never exposes native storage, undo descriptors or before-images.
+ */
+export interface ProjectionRecoveryAdapter extends ProjectionRollbackAdapter {
+  readonly recoveryCapabilities: ProjectionRecoveryCapabilities;
+  retainedCheckpoints(request: ProjectionRetainedCheckpointRequest): Promise<ProjectionRetainedCheckpointView>;
 }
 
 export type ProjectionErrorCode =
   | 'projection.invalid-contract' | 'projection.capability-unavailable'
   | 'projection.not-initialized' | 'projection.incomplete' | 'projection.stale-view'
   | 'projection.conflicting-replay' | 'projection.source-gap'
-  | 'projection.replay-unavailable' | 'projection.apply-unavailable';
+  | 'projection.replay-unavailable' | 'projection.apply-unavailable'
+  | 'projection.stale-revision' | 'projection.rollback-unavailable';
 export class ProjectionContractError extends Error {
   readonly retryable: boolean;
   constructor(readonly code: ProjectionErrorCode, message: string) {
     super(message);
     this.name = 'ProjectionContractError';
     this.retryable = ['projection.not-initialized', 'projection.incomplete', 'projection.stale-view',
-      'projection.replay-unavailable', 'projection.apply-unavailable'].includes(code);
+      'projection.replay-unavailable', 'projection.apply-unavailable',
+      'projection.stale-revision', 'projection.rollback-unavailable'].includes(code);
   }
 }
 export type ProjectionValidationResult<T> =
@@ -432,6 +602,240 @@ export function validateProjectionView(input: unknown): ProjectionValidationResu
     keys(value, ['binding', 'checkpoint']);
     bindingShape(value.binding, undefined, '/binding');
     checkpointShape(value.checkpoint, '/checkpoint');
+  });
+}
+
+function rollbackViewShape(input: unknown): void {
+  const value = record(input, '');
+  keys(value, ['binding', 'checkpoint', 'revision']);
+  bindingShape(value.binding, undefined, '/binding');
+  checkpointShape(value.checkpoint, '/checkpoint');
+  hash(value.revision, '/revision');
+}
+function rollbackPendingShape(input: unknown, path: string): void {
+  const value = record(input, path);
+  keys(value, ['block', 'digest', 'reason'], [], path);
+  checkpointShape(value.block, `${path}/block`, true);
+  if (value.digest !== null) hash(value.digest, `${path}/digest`);
+  if (value.reason !== null) string(value.reason, `${path}/reason`, 4096, true);
+}
+function sameCheckpoint(a: ProjectionCheckpoint, b: ProjectionCheckpoint): boolean {
+  return a.blockNum === b.blockNum && a.blockId === b.blockId;
+}
+
+/** Explicit activation of the independently fenced interface; never widens the v1 validator. */
+export function validateProjectionRollbackActivation(definition: unknown, binding: unknown,
+  capabilities: unknown): ProjectionValidationResult<ProjectionRollbackActivation> {
+  return validating({definition, binding, capabilities}, copy => {
+    const value = record(copy, '');
+    definitionShape(value.definition, '/definition');
+    bindingShape(value.binding, value.definition as ProjectionDefinition, '/binding');
+    const caps = record(value.capabilities, '/capabilities');
+    keys(caps, ['interfaceVersion', 'supported'], [], '/capabilities');
+    check(caps.interfaceVersion === 2 && Array.isArray(caps.supported)
+      && caps.supported.length <= PROJECTION_ROLLBACK_CAPABILITIES.length,
+    '/capabilities', 'Expected projection rollback capability interfaceVersion 2');
+    const seen = new Set<string>();
+    for (const [i, supported] of caps.supported.entries()) {
+      check(typeof supported === 'string' && (PROJECTION_ROLLBACK_CAPABILITIES as readonly string[]).includes(supported),
+        `/capabilities/supported/${i}`, 'Unknown capability');
+      check(!seen.has(supported), `/capabilities/supported/${i}`, 'Duplicate capability');
+      seen.add(supported);
+    }
+    for (const required of PROJECTION_ROLLBACK_CAPABILITIES) if (!seen.has(required)) {
+      fail('/capabilities/supported', `Adapter does not support required capability ${required}`, 'projection.capability-unavailable');
+    }
+  });
+}
+export function validateProjectionRollbackView(input: unknown): ProjectionValidationResult<ProjectionRollbackReadView> {
+  return validating(input, rollbackViewShape);
+}
+function rollbackApplyShape(input: unknown, definition?: ProjectionDefinition): void {
+  const value = record(input, '');
+  keys(value, ['revision', 'batch']);
+  hash(value.revision, '/revision');
+  applyShape(value.batch, definition);
+}
+/** Capture the complete inert fenced batch before awaiting a durable definition lookup. */
+export function validateProjectionRollbackApplyInput(input: unknown): ProjectionValidationResult<ProjectionRollbackApplyRequest> {
+  return validating(input, copy => rollbackApplyShape(copy));
+}
+export function validateProjectionRollbackApply(definition: unknown,
+  input: unknown): ProjectionValidationResult<ProjectionRollbackApplyRequest> {
+  const checked = validateProjectionDefinition(definition);
+  if (!checked.valid) return checked;
+  return validating(input, copy => rollbackApplyShape(copy, checked.value));
+}
+export function validateProjectionRollbackIncomplete(input: unknown): ProjectionValidationResult<ProjectionRollbackIncompleteRequest> {
+  return validating(input, copy => {
+    const value = record(copy, '');
+    keys(value, ['binding', 'revision', 'block', 'reason']);
+    bindingShape(value.binding, undefined, '/binding');
+    hash(value.revision, '/revision');
+    checkpointShape(value.block, '/block', true);
+    string(value.reason, '/reason', 4096);
+  });
+}
+export function validateProjectionRollbackRequest(input: unknown): ProjectionValidationResult<ProjectionRollbackRequest> {
+  return validating(input, copy => {
+    const value = record(copy, '');
+    keys(value, ['binding', 'revision', 'operationId', 'from', 'ancestor', 'maxBlocks']);
+    bindingShape(value.binding, undefined, '/binding');
+    hash(value.revision, '/revision');
+    string(value.operationId, '/operationId', 128);
+    checkpointShape(value.from, '/from');
+    checkpointShape(value.ancestor, '/ancestor');
+    check((value.ancestor as ProjectionCheckpoint).blockNum <= (value.from as ProjectionCheckpoint).blockNum,
+      '/ancestor', 'Rollback ancestor cannot follow the expected completed checkpoint');
+    integer(value.maxBlocks, '/maxBlocks', 1, PROJECTION_ROLLBACK_LIMITS.maxSteps);
+  });
+}
+export function validateProjectionRollbackRecovery(input: unknown): ProjectionValidationResult<ProjectionRollbackRecoveryView> {
+  return validating(input, copy => {
+    const value = record(copy, '');
+    keys(value, ['binding', 'checkpoint', 'initialized', 'pending', 'gap', 'revision', 'coverage', 'rollback']);
+    bindingShape(value.binding, undefined, '/binding');
+    checkpointShape(value.checkpoint, '/checkpoint');
+    const checkpoint = value.checkpoint as ProjectionCheckpoint;
+    hash(value.revision, '/revision');
+    check(typeof value.initialized === 'boolean', '/initialized', 'Expected initialization status');
+    if (value.pending !== null) {
+      rollbackPendingShape(value.pending, '/pending');
+      const pending = value.pending as ProjectionPendingSource;
+      check(pending.block.blockNum === checkpoint.blockNum + 1 && pending.block.previousBlockId === checkpoint.blockId,
+        '/pending/block', 'Pending source must extend the exact completed checkpoint');
+    }
+    if (value.gap !== null) {
+      rollbackPendingShape(value.gap, '/gap');
+      const gap = value.gap as ProjectionPendingSource;
+      check(gap.block.blockNum > checkpoint.blockNum, '/gap/block', 'Source gap must follow completed progress');
+      if (gap.block.blockNum === checkpoint.blockNum + 1) {
+        check(gap.block.previousBlockId === checkpoint.blockId, '/gap/block', 'Next gap source must extend the exact checkpoint');
+      }
+      if (value.pending !== null) {
+        const pending = value.pending as ProjectionPendingSource;
+        check(pending.block.blockNum <= gap.block.blockNum, '/pending/block', 'Pending source cannot follow the observed source gap');
+        if (pending.block.blockNum === gap.block.blockNum) {
+          check(sameCheckpoint(pending.block, gap.block) && pending.block.previousBlockId === gap.block.previousBlockId
+            && (pending.digest === null || gap.digest === null || pending.digest === gap.digest),
+          '/gap', 'Pending and gap source identities conflict');
+        } else if (pending.block.blockNum === gap.block.blockNum - 1) {
+          check(pending.block.blockId === gap.block.previousBlockId, '/gap/block', 'Adjacent pending and gap sources conflict');
+        }
+      }
+    }
+    const coverage = record(value.coverage, '/coverage');
+    keys(coverage, ['floor', 'retainedBlocks', 'retainedBytes', 'maxBlocks', 'maxBytes'], [], '/coverage');
+    checkpointShape(coverage.floor, '/coverage/floor');
+    const floor = coverage.floor as ProjectionCheckpoint;
+    integer(coverage.maxBlocks, '/coverage/maxBlocks', 1, PROJECTION_ROLLBACK_LIMITS.retainedBlocks);
+    integer(coverage.maxBytes, '/coverage/maxBytes', 1, PROJECTION_ROLLBACK_LIMITS.retainedBytes);
+    integer(coverage.retainedBlocks, '/coverage/retainedBlocks', 0, coverage.maxBlocks);
+    integer(coverage.retainedBytes, '/coverage/retainedBytes', 0, coverage.maxBytes);
+    check(floor.blockNum <= checkpoint.blockNum && checkpoint.blockNum - floor.blockNum === coverage.retainedBlocks,
+      '/coverage', 'Coverage must describe the contiguous retained window ending at the completed checkpoint');
+    check(coverage.retainedBlocks === 0
+      ? sameCheckpoint(floor, checkpoint) && coverage.retainedBytes === 0
+      : coverage.retainedBytes > 0,
+    '/coverage', 'Empty coverage has no retained undo bytes; retained blocks require encoded undo data');
+    if (value.rollback !== null) {
+      const rollback = record(value.rollback, '/rollback');
+      keys(rollback, ['operationId', 'sourceRevision', 'from', 'ancestor', 'status', 'reason'], [], '/rollback');
+      string(rollback.operationId, '/rollback/operationId', 128);
+      hash(rollback.sourceRevision, '/rollback/sourceRevision');
+      check(rollback.sourceRevision !== value.revision, '/rollback/sourceRevision', 'Recovery must rotate the persisted revision before undo');
+      checkpointShape(rollback.from, '/rollback/from');
+      checkpointShape(rollback.ancestor, '/rollback/ancestor');
+      const from = rollback.from as ProjectionCheckpoint;
+      const ancestor = rollback.ancestor as ProjectionCheckpoint;
+      check(ancestor.blockNum <= from.blockNum, '/rollback/ancestor', 'Rollback ancestor cannot follow its starting checkpoint');
+      check(['running', 'complete', 'unavailable'].includes(rollback.status as string), '/rollback/status', 'Unknown rollback status');
+      if (rollback.status === 'unavailable') string(rollback.reason, '/rollback/reason', 4096);
+      else check(rollback.reason === null, '/rollback/reason', 'Only unavailable recovery carries a failure reason');
+      if (rollback.status === 'running') {
+        check(ancestor.blockNum >= floor.blockNum
+          && (ancestor.blockNum !== floor.blockNum || sameCheckpoint(ancestor, floor)),
+        '/rollback/ancestor', 'Running rollback ancestor is outside the retained recovery coverage');
+        check(checkpoint.blockNum >= ancestor.blockNum && checkpoint.blockNum <= from.blockNum,
+          '/checkpoint', 'Running rollback checkpoint is outside its source range');
+        if (checkpoint.blockNum === from.blockNum) check(sameCheckpoint(checkpoint, from), '/checkpoint', 'Rollback start identity differs');
+        if (checkpoint.blockNum === ancestor.blockNum) check(sameCheckpoint(checkpoint, ancestor), '/checkpoint', 'Rollback ancestor identity differs');
+      } else if (rollback.status === 'complete') {
+        check(checkpoint.blockNum >= ancestor.blockNum, '/checkpoint', 'Completed recovery cannot precede its ancestor');
+        if (checkpoint.blockNum === ancestor.blockNum) check(sameCheckpoint(checkpoint, ancestor), '/checkpoint', 'Completed ancestor identity differs');
+      }
+    }
+    if (!value.initialized) check(checkpoint.blockNum === 0 && value.pending === null && value.gap === null
+      && value.rollback === null, '/initialized', 'Uninitialized recovery cannot contain applied or pending source work');
+  });
+}
+
+/** Independently activate inspection while preserving the exact existing rollback contract. */
+export function validateProjectionRecoveryActivation(definition: unknown, binding: unknown,
+  capabilities: unknown, recoveryCapabilities: unknown): ProjectionValidationResult<ProjectionRecoveryActivation> {
+  return validating({definition, binding, capabilities, recoveryCapabilities}, copy => {
+    const value = record(copy, '');
+    const rollback = validateProjectionRollbackActivation(value.definition, value.binding, value.capabilities);
+    if (!rollback.valid) {
+      const error = rollback.errors[0]!;
+      fail(error.path, error.message, error.code);
+    }
+    const caps = record(value.recoveryCapabilities, '/recoveryCapabilities');
+    keys(caps, ['interfaceVersion', 'supported'], [], '/recoveryCapabilities');
+    check(caps.interfaceVersion === 1 && Array.isArray(caps.supported)
+      && caps.supported.length <= PROJECTION_RECOVERY_CAPABILITIES.length,
+    '/recoveryCapabilities', 'Expected projection recovery capability interfaceVersion 1');
+    const seen = new Set<string>();
+    for (const [i, supported] of caps.supported.entries()) {
+      check(typeof supported === 'string' && (PROJECTION_RECOVERY_CAPABILITIES as readonly string[]).includes(supported),
+        `/recoveryCapabilities/supported/${i}`, 'Unknown capability');
+      check(!seen.has(supported), `/recoveryCapabilities/supported/${i}`, 'Duplicate capability');
+      seen.add(supported);
+    }
+    for (const required of PROJECTION_RECOVERY_CAPABILITIES) if (!seen.has(required)) {
+      fail('/recoveryCapabilities/supported', `Adapter does not support required capability ${required}`, 'projection.capability-unavailable');
+    }
+  });
+}
+
+export function validateProjectionRetainedCheckpointRequest(input: unknown): ProjectionValidationResult<ProjectionRetainedCheckpointRequest> {
+  return validating(input, copy => {
+    const value = record(copy, '');
+    keys(value, ['binding', 'revision']);
+    bindingShape(value.binding, undefined, '/binding');
+    hash(value.revision, '/revision');
+  });
+}
+
+/** Capture a bounded metadata-only path; its canonicality remains the host's responsibility. */
+export function validateProjectionRetainedCheckpoints(input: unknown): ProjectionValidationResult<ProjectionRetainedCheckpointView> {
+  return validating(input, copy => {
+    const value = record(copy, '');
+    keys(value, ['recovery', 'checkpoints']);
+    const recovery = validateProjectionRollbackRecovery(value.recovery);
+    if (!recovery.valid) {
+      const error = recovery.errors[0]!;
+      fail(`/recovery${error.path}`, error.message, error.code);
+    }
+    const {checkpoint, coverage} = recovery.value;
+    check(Array.isArray(value.checkpoints) && value.checkpoints.length >= 1
+      && value.checkpoints.length <= PROJECTION_ROLLBACK_LIMITS.retainedBlocks + 1,
+    '/checkpoints', 'Expected a bounded nonempty retained checkpoint path');
+    check(value.checkpoints.length === coverage.retainedBlocks + 1,
+      '/checkpoints', 'Retained checkpoint count must include every retained block and its floor');
+    const identities = new Set<string>();
+    for (const [i, inputPoint] of value.checkpoints.entries()) {
+      const path = `/checkpoints/${i}`;
+      checkpointShape(inputPoint, path);
+      const point = inputPoint as ProjectionCheckpoint;
+      check(point.blockNum === checkpoint.blockNum - i, path, 'Retained checkpoints must descend contiguously');
+      check(!identities.has(point.blockId), `${path}/blockId`, 'Duplicate retained block identity');
+      identities.add(point.blockId);
+    }
+    check(sameCheckpoint(value.checkpoints[0] as ProjectionCheckpoint, checkpoint),
+      '/checkpoints/0', 'Retained path must start at the recovery checkpoint');
+    check(sameCheckpoint(value.checkpoints[value.checkpoints.length - 1] as ProjectionCheckpoint, coverage.floor),
+      '/checkpoints', 'Retained path must end at the recovery coverage floor');
   });
 }
 
