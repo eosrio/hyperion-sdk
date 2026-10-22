@@ -68,6 +68,12 @@ facts from retained sections for [History API #240](https://github.com/eosrio/hy
 and [SDK #9](https://github.com/eosrio/hyperion-sdk/issues/9). The host verifies the selected source and
 reruns the hook before granting coverage; ordinary missing-trace guards remain unchanged.
 
+The optional [protocol-native action contract](docs/protocol-native-actions.md), tracked in
+[SDK #19](https://github.com/eosrio/hyperion-sdk/issues/19), adds explicit host capability negotiation,
+detached per-origin decisions and a separate native value codec. Its validators establish shapes
+and declared interface agreement; source verification, canonical authority and activation remain
+provider/host work.
+
 ## Portable table projection development API
 
 The additive [table projection contract](docs/projection.md) is the first SDK #1 slice. It supplies

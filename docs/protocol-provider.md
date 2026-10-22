@@ -86,6 +86,10 @@ replace `@eosrio/hyperion-plugin-core` or change declarative definitions/logical
 
 ## Observe ABI source facts before filtering
 
+The separate optional [native-action capability](protocol-native-actions.md) observes original
+retained source and interprets provider-owned native values independently from deployed contract
+ABIs. Existing profiles, SHiP sessions and the contract codec remain unchanged.
+
 The optional synchronous `observeBlockAbi(input, source)` hook is the additive contract for
 [SDK #6](https://github.com/eosrio/hyperion-sdk/issues/6) and
 [History API #213](https://github.com/eosrio/hyperion-history-api/issues/213). Existing providers
