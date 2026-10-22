@@ -6,7 +6,7 @@ follow the [shared architecture](https://github.com/eosrio/hyperion-tools/blob/a
 Describe delivered behavior, acceptance evidence, genuine dependencies and compatible component
 versions. Keep public contracts in the SDK and database-native operations in adapters.
 
-Use Bun 1.4.3 from `.bun-version` and the pinned TypeScript 7.0.2 compiler. Install with
+Use Bun 1.4.4 from `.bun-version` and the pinned TypeScript 7.0.2 compiler. Install with
 `npm ci`; the npm lockfile remains canonical. `npm run typecheck` runs `bun check -p tsconfig.json`,
 and `npm run build` emits JavaScript and declarations with TypeScript. Run `npm run typecheck`,
 `npm test`, `npm run test:package` and
