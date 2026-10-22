@@ -63,6 +63,8 @@ export const protocolNativeActionBounds = Object.freeze({
 
 const digest = /^[0-9a-f]{64}$/;
 const diagnostics = new WeakSet<object>();
+// Capture the intrinsic before provider code; callable-owned bind/name/length are not admission hooks.
+const applyNativeMethod = Reflect.apply;
 function invalid(path: string, message: string, code = 'protocol.invalid-native-observations'): Diagnostic {
   const value = {path, message, code};
   diagnostics.add(value);
@@ -136,7 +138,10 @@ export function validateProtocolNativeActions(input: unknown,
     const decodeValue = properties.decodeValue!.value as ProtocolNativeActions['decodeValue'];
     const encodeValue = properties.encodeValue!.value as ProtocolNativeActions['encodeValue'];
     return {valid: true, nativeActions: Object.freeze({interfaceVersion: 1,
-      observe: observe.bind(input), decodeValue: decodeValue.bind(input), encodeValue: encodeValue.bind(input)})};
+      observe: (sourceInput: ProtocolNativeActionBlockInput, source: ProtocolBlockAbiSource) =>
+        applyNativeMethod(observe, input, [sourceInput, source]),
+      decodeValue: (kind: string, bytes: Uint8Array) => applyNativeMethod(decodeValue, input, [kind, bytes]),
+      encodeValue: (kind: string, value: unknown) => applyNativeMethod(encodeValue, input, [kind, value])})};
   } catch (error) {
     return {valid: false, errors: [ownDiagnostic(error)
       ? {...error, code: error.code === 'protocol.invalid-native-observations' ? 'protocol.invalid-native-actions' : error.code}

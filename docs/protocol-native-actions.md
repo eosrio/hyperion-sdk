@@ -34,7 +34,9 @@ if (selected.profile.nativeActions) {
 
 `validateProtocolNativeActions` checks the version and own data-function properties `observe`,
 `decodeValue` and `encodeValue` without invoking them or an accessor. It returns a frozen method
-snapshot bound to the original receiver. It does not execute conformance probes, validate a
+snapshot bound to the original receiver through a captured invocation intrinsic. Callable-owned
+`bind` properties or `name`/`length` accessors are not evaluated, and later replacement of the
+original methods cannot change the snapshot. It does not execute conformance probes, validate a
 method's output or create authority. Validate observed output separately; the host owns original
 input validation, resource lifetimes, codec behavior and cancellation.
 

@@ -107,6 +107,47 @@ test('runtime validation checks agreement without invoking methods and preserves
   assert.ok(Object.isFrozen(result.nativeActions));
 });
 
+for (const binding of ['getter', 'value']) test(`runtime snapshot ignores callable-owned ${binding} bind properties`, () => {
+  for (const frozen of [false, true]) {
+    let getters = 0, metadataGetters = 0, binders = 0, replacements = 0, calls = 0;
+    class Capability {
+      #marker = 7;
+      constructor() {
+        this.interfaceVersion = 1;
+        this.observe = this.observe;
+        this.decodeValue = this.decodeValue;
+        this.encodeValue = this.encodeValue;
+      }
+      observe() {calls++; assert.equal(this.#marker, 7); return observations();}
+      decodeValue() {calls++; return this.#marker;}
+      encodeValue() {calls++; return new Uint8Array([this.#marker]);}
+    }
+    const capability = new Capability();
+    const binder = () => {binders++; return () => {replacements++; return 'replaced';};};
+    for (const method of ['observe', 'decodeValue', 'encodeValue']) {
+      Object.defineProperty(capability[method], 'bind', binding === 'getter'
+        ? {get() {getters++; return binder;}} : {value: binder});
+      for (const property of ['name', 'length']) Object.defineProperty(capability[method], property,
+        {get() {metadataGetters++; throw new Error('Callable metadata accessor ran');}});
+      Object.freeze(capability[method]);
+    }
+    if (frozen) Object.freeze(capability);
+    const result = validateProtocolNativeActions(capability, {interfaceVersion: 1});
+    assert.equal(result.valid, true);
+    assert.deepEqual({getters, metadataGetters, binders, replacements, calls}, {getters: 0, metadataGetters: 0, binders: 0, replacements: 0, calls: 0});
+    if (!frozen) {
+      for (const method of ['observe', 'decodeValue', 'encodeValue']) capability[method] = () => {throw new Error('method replaced');};
+      capability.interfaceVersion = 2;
+    }
+    assert.ok(Object.isFrozen(result.nativeActions));
+    assert.equal(result.nativeActions.interfaceVersion, 1);
+    assert.equal(result.nativeActions.observe({}, {}).schemaVersion, 1);
+    assert.equal(result.nativeActions.decodeValue('fixture', new Uint8Array()), 7);
+    assert.deepEqual(result.nativeActions.encodeValue('fixture', 7), new Uint8Array([7]));
+    assert.deepEqual({getters, metadataGetters, binders, replacements, calls}, {getters: 0, metadataGetters: 0, binders: 0, replacements: 0, calls: 3});
+  }
+});
+
 test('missing methods, incompatible runtime versions and accessor methods fail before decoding', () => {
   let executions = 0;
   const capability = {interfaceVersion: 1, observe() {}, decodeValue() {}, encodeValue() {}};
