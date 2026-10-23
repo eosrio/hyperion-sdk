@@ -25,6 +25,10 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: npm ci
+      - name: Verify the pinned checker and embedded TypeScript
+        run: |
+          test "$(bun --version)" = "$(cat .bun-version)"
+          test "$(bun -p process.versions.typescript)" = "$(node -p 'require("./package.json").devDependencies.typescript')"
       - run: npm run typecheck
       - run: npm test
       - run: npm run test:package
