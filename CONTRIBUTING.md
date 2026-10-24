@@ -12,7 +12,7 @@ and `npm run build` emits JavaScript and declarations with TypeScript. Run `npm 
 `npm test`, `npm run test:package` and
 `npm run check:docs`. Behavioral tests use the public manifest/compatibility API; the package check
 compiles and runs an isolated consumer of the packed artifact. Keep schema, public validation,
-types and metadata documentation aligned. Preserve TypeScript artifact emission and Node 22/24
+types and metadata documentation aligned. Preserve TypeScript artifact emission and Node 24/26
 acceptance; Bun's checker is not a production runtime requirement. These checks do not establish
 plugin/runtime compatibility.
 
