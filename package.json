@@ -5,7 +5,7 @@
   "description": "Development metadata and portable protocol contracts for Hyperion extensions",
   "license": "MIT",
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": { "node": ">=24" },
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
     "./protocol": { "types": "./dist/protocol.d.ts", "import": "./dist/protocol.js" },
