@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import * as sdk from '@eosrio/hyperion-sdk/projection-stateful';
+import {setup, source, eventsA, assetReducer, assetId, hex} from './stateful-reference.mjs';
+const state=await setup('packed-memory'),input=source(state.declaration,1,hex(1),{blockNum:0,blockId:hex(0)},eventsA());
+let hooks=0;const hook=async p=>{hooks++;await assetReducer()(p);},guard=()=>{};
+await sdk.executeStatefulBlock(state.declaration,input,state.adapter,state.custody,hook,guard);
+assert.equal((await sdk.executeStatefulBlock(state.declaration,input,state.adapter,state.custody,hook,guard)).status,'duplicate');
+assert.equal(hooks,1);
+const view=await state.adapter.open(state.declaration);
+const [result]=await sdk.readStatefulRecords(state.declaration,state.adapter,view,[{kind:'asset',key:assetId}],guard);
+assert.equal(result.value.owner,'bob');assert.equal(result.value.immutable_data.serial,'18446744073709551615');
+const bad=structuredClone(input);bad.inputs[0].abiSha256=hex(99);
+await assert.rejects(sdk.executeStatefulBlock(state.declaration,bad,state.adapter,state.custody,hook,guard));
+assert.equal(hooks,1);
+assert.equal(Object.hasOwn(await import('@eosrio/hyperion-sdk'),'STATEFUL_FAMILY'),false,'Family requires its explicit opt-in subpath');
+console.log('Packed stateful source/reduction/custody/duplicate/coherent read and admission negatives passed; no engine qualification.');

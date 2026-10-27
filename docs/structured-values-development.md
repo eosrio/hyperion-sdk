@@ -4,7 +4,8 @@ SDK #32's first implementation slice is internal development code, separate from
 [proposed family](projection-stateful-proposal.md). It adds no package export/subpath, metadata
 capability, activation, adapter support or accepted family interface. Existing scalar and contextual
 contracts remain unchanged. Source occurrences, staged reduction, candidate receipts, coherent
-views and runtime recovery still require their own reviewed implementation.
+views and runtime recovery now have a separate [SDK development candidate](projection-stateful.md);
+their real host/engine integration remains unqualified.
 
 The internal record function validates inert JSON, then creates a detached deeply frozen record,
 canonical JSON text and its exact UTF-8 byte count. Object keys use deterministic UTF-16 code-unit
@@ -44,3 +45,7 @@ MongoDB, WormDB or original processors and establish no backend, full API or Ato
 The original NUL/literal-backslash conversion policy remains undecided. This experiment refuses
 strings and keys containing NUL or the literal `\u0000` sequence, preserving the original baseline's
 separate NUL-to-space and invalid-JSON controls rather than choosing a replacement policy.
+
+The new generic family uses a shared generic capture path that accepts those well-formed strings
+unchanged. The private `canonicalStructuredRecord` wrapper keeps this original conservative refusal;
+generic JSON and domain codec compatibility are separate policies, with no selected normalization.

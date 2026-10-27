@@ -1,4 +1,4 @@
-/** Internal SDK #32 experiment. No package export, family negotiation or activation. */
+/** Shared pure record capture. Public family exports own negotiation; legacy wrapper stays private. */
 export type StructuredValue = null | boolean | number | string | readonly StructuredValue[] | StructuredRecord;
 export interface StructuredRecord {readonly [key: string]: StructuredValue}
 export interface StructuredValueLimits {
@@ -42,7 +42,7 @@ function properties(input: unknown, array: boolean, maximum: number): Properties
   }
   return result;
 }
-function textBytes(value: string, maximum: number): {raw: number; json: number} {
+function textBytes(value: string, maximum: number, legacy: boolean): {raw: number; json: number} {
   check(value.length <= maximum, 'string byte bound');
   for (let i = 0; i < value.length; i++) {
     const unit = value.charCodeAt(i);
@@ -52,7 +52,7 @@ function textBytes(value: string, maximum: number): {raw: number; json: number} 
     } else check(unit < 0xdc00 || unit > 0xdfff, 'malformed Unicode');
   }
   // The original NUL/literal-escape policy is unresolved; this experiment refuses both.
-  check(!value.includes('\0') && !value.includes('\\u0000'), 'unsupported NUL conversion policy');
+  if (legacy) check(!value.includes('\0') && !value.includes('\\u0000'), 'unsupported NUL conversion policy');
   let raw = 0, json = 2;
   for (let i = 0; i < value.length; i++) {
     const unit = value.charCodeAt(i);
@@ -64,7 +64,7 @@ function textBytes(value: string, maximum: number): {raw: number; json: number} 
   check(raw <= maximum, 'string byte bound');
   return {raw, json};
 }
-function exactInteger(value: unknown, type: IntegerField['type']): void {
+export function validateStructuredInteger(value: unknown, type: IntegerField['type']): void {
   check(typeof value === 'string' && value.length <= 20, 'exact integer decimal string');
   check(/^(0|[1-9][0-9]*|-[1-9][0-9]*)$/.test(value), 'noncanonical integer');
   const negative = value.startsWith('-'), magnitude = negative ? value.slice(1) : value;
@@ -72,7 +72,7 @@ function exactInteger(value: unknown, type: IntegerField['type']): void {
   const maximum = type === 'uint64' ? '18446744073709551615' : negative ? '9223372036854775808' : '9223372036854775807';
   check(magnitude.length < maximum.length || magnitude.length === maximum.length && magnitude <= maximum, 'integer range');
 }
-function declaration(input: readonly IntegerField[], limits: StructuredValueLimits): Schema {
+function declaration(input: readonly IntegerField[], limits: StructuredValueLimits, legacy: boolean): Schema {
   const entries = properties(input, true, limits.integerFields), length = entries.length!.value as number;
   check(length <= limits.integerFields, 'integer declaration bound');
   const root: Schema = {children: new Map()};
@@ -88,7 +88,7 @@ function declaration(input: readonly IntegerField[], limits: StructuredValueLimi
     for (let j = 0; j < size; j++) {
       const key = path[String(j)]!.value;
       check(typeof key === 'string', 'integer path segment');
-      textBytes(key, limits.stringBytes); parts.push(key);
+      textBytes(key, limits.stringBytes, legacy); parts.push(key);
       check(!current.integer, 'overlapping integer paths');
       let child = current.children.get(key);
       if (!child) {child = {children: new Map()}; current.children.set(key, child);}
@@ -105,7 +105,7 @@ function declaration(input: readonly IntegerField[], limits: StructuredValueLimi
  * or preemption boundary for trusted code. Integer declarations belong to the separately pinned
  * definition identity; the returned canonical text identifies only the record value.
  */
-export function canonicalStructuredRecord(input: unknown, integerFields: readonly IntegerField[], requested: StructuredValueLimits):
+function capture(input: unknown, integerFields: readonly IntegerField[], requested: StructuredValueLimits, legacy: boolean):
   {readonly value: StructuredRecord; readonly canonical: string; readonly bytes: number} {
   const settings = properties(requested, false, 8);
   const names = ['depth', 'nodes', 'fields', 'arrayElements', 'stringBytes', 'recordBytes', 'integerFields', 'pathSegments'] as const;
@@ -116,7 +116,7 @@ export function canonicalStructuredRecord(input: unknown, integerFields: readonl
     check(Number.isSafeInteger(value) && value >= 0, 'explicit nonnegative safe limits required'); limits[name] = value;
   }
   check(limits.nodes > 0 && limits.recordBytes >= 2, 'record admission bound');
-  const schema = declaration(integerFields, limits), captured = new Map<object, Properties>(), ancestors = new Set<object>();
+  const schema = declaration(integerFields, limits, legacy), captured = new Map<object, Properties>(), ancestors = new Set<object>();
   const work: {value: unknown; depth: number; schema?: Schema; integer?: IntegerField['type']; exit?: object}[] = [{value: input, depth: 0, schema}];
   let nodes = 0, bytes = 0;
   const account = (size: number) => {check(size <= limits.recordBytes - bytes, 'record byte bound'); bytes += size;};
@@ -128,9 +128,9 @@ export function canonicalStructuredRecord(input: unknown, integerFields: readonl
     const value = item.value, field = item.schema?.integer;
     if (field) check(Array.isArray(value) === field.vector, 'integer scalar/vector shape');
     const integer = item.integer ?? (field && !field.vector ? field.type : undefined);
-    if (integer) exactInteger(value, integer);
+    if (integer) validateStructuredInteger(value, integer);
     if (item.schema?.children.size) check(typeof value === 'object' && value !== null && !Array.isArray(value), 'integer path parent must be an object');
-    if (typeof value === 'string') {account(textBytes(value, limits.stringBytes).json); continue;}
+    if (typeof value === 'string') {account(textBytes(value, limits.stringBytes, legacy).json); continue;}
     if (typeof value === 'number') {check(Number.isFinite(value), 'nonfinite number'); account(JSON.stringify(value).length); continue;}
     if (value === null || typeof value === 'boolean') {account(value === false ? 5 : 4); continue;}
     check(typeof value === 'object' && value !== null, 'non-JSON value');
@@ -143,7 +143,7 @@ export function canonicalStructuredRecord(input: unknown, integerFields: readonl
     check(keys.length <= limits.nodes - nodes, 'node bound');
     account(2 + Math.max(0, keys.length - 1)); ancestors.add(value); work.push({value: null, depth: 0, exit: value});
     for (const key of keys) {
-      if (!array) account(textBytes(key, limits.stringBytes).json + 1);
+      if (!array) account(textBytes(key, limits.stringBytes, legacy).json + 1);
       const child = {value: props[key]!.value as unknown, depth: item.depth + 1};
       const nextSchema = array ? undefined : item.schema?.children.get(key);
       const nextInteger = array && field?.vector ? field.type : undefined;
@@ -181,4 +181,13 @@ export function canonicalStructuredRecord(input: unknown, integerFields: readonl
     }
   }
   return Object.freeze({value: result, canonical: output.join(''), bytes});
+}
+
+/** Retained private first-tracer restriction; this does not define generic JSON or codec parity. */
+export function canonicalStructuredRecord(input: unknown, fields: readonly IntegerField[], limits: StructuredValueLimits) {
+  return capture(input, fields, limits, true);
+}
+/** Generic inert JSON preserves well-formed NUL and literal escapes; codecs own their own policy. */
+export function canonicalStructuredJsonRecord(input: unknown, fields: readonly IntegerField[], limits: StructuredValueLimits) {
+  return capture(input, fields, limits, false);
 }
