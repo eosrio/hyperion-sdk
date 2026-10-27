@@ -37,8 +37,15 @@ One immutable definition declares a finite set of input selectors and logical re
 atomic group. Bind chain, selected backend, generation, mapping revision, hook artifact/revision,
 metadata codec and normalization revisions, and each selector's contract/action or table plus exact
 ABI deployment/hash. Hash the complete declaration; changed content under the same identity fails.
-An ABI or hook change requires reviewed compatibility and staged activation/rebuild, not an automatic
-code update. No domain names, original processor priorities or database schema enter generic core.
+Under the operator-selected
+[full-auto policy](https://github.com/eosrio/hyperion-tools/blob/458e1127b99c025251055e160129010edcecc78a/docs/adr/0012-generate-state-mappings-for-allowed-accounts.md),
+compatible declarative ABI/mapping epochs are generated, validated and
+[live activated](https://github.com/eosrio/hyperion-tools/blob/458e1127b99c025251055e160129010edcecc78a/docs/adr/0038-require-live-declarative-mapping-reload-for-45.md)
+without per-deployment human approval or indexer restart. An incompatible epoch remains scoped
+incomplete until compatible processing is available; stage backfill/rebuild only when needed, not
+for every on-chain `setabi`. Executable hook/native updates remain audited, pinned, operator-initiated
+code changes and may require controlled restarts. Declarative reload does not authorize executable
+replacement. No domain names, original processor priorities or database schema enter generic core.
 
 Records contain bounded inert JSON trees: well-formed strings, booleans, explicit null, ordered arrays,
 objects and finite numeric leaves. Declared int64/uint64 leaves, including vectors, use canonical
@@ -55,7 +62,11 @@ implicit recursive merge, increment or database operator. The plugin may read th
 record preserving required creation/immutable fields; a replacement mutable object drops removed
 members. It models original asset upsert and mint-fact insert-if-absent separately using exact reads.
 
-| Proposed maximum | Bound |
+The table gives **initial illustrative engineering-tracer bounds**, pending representative metadata,
+mass-mint workloads and resource profiling. These are not selected production SDK ceilings or a
+reduction of the full 2.7.0 parity requirement; the existing recovery-contract limits below stay intact.
+
+| Illustrative tracer maximum | Value pending profiling |
 | --- | ---: |
 | Declared input selectors / record kinds | 16 / 8 |
 | Top-level record fields / structured depth | 64 / 16 |
@@ -69,9 +80,16 @@ members. It models original asset upsert and mint-fact insert-if-absent separate
 The staged overlay counts toward the candidate budget, including repeated-key operations. Reject
 accessors, functions, cycles, sparse arrays, malformed Unicode and excess traversal before effects.
 Adapters may advertise lower bounds; activation refuses a definition requiring more. Over-bound
-work stays incomplete without advancing progress; larger blocks need a separately reviewed bounded
-processing strategy. Existing host attempt deadlines and cancellation apply across awaits and before
-commit. These limits do not promise preemption of arbitrary trusted JavaScript or a new sandbox.
+work stays incomplete without advancing progress; larger valid blocks need a qualified bounded
+processing strategy, with no silent data loss. Existing host attempt deadlines and cancellation apply
+across awaits and before commit. These limits do not promise preemption of arbitrary trusted
+JavaScript or a new sandbox.
+
+These per-candidate/value bounds are separate from
+[HAPI #277](https://github.com/eosrio/hyperion-history-api/issues/277)'s experimental per-chain
+aggregate budget policy. Its explicit budget requirement is approved; numeric value, default,
+units, syntax and activation policy remain unselected. This proposal chooses none of them and
+authorizes no production activation.
 
 ## Original inputs and deterministic staging
 
