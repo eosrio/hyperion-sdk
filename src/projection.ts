@@ -883,3 +883,297 @@ export function projectionRowKey(scope: unknown, primaryKey: unknown): string {
   if (encoder.encode(key).length > PROJECTION_LIMITS.keyBytes) throw new ProjectionContractError('projection.invalid-contract', 'Encoded row key exceeds the key byte budget');
   return key;
 }
+
+/** Separate opt-in definition family; v1 definitions and full-put semantics stay unchanged. */
+export interface ContextualProjectionField {
+  readonly name: string;
+  readonly type: ProjectionField['type'];
+  readonly source:
+    | {readonly kind: 'row'; readonly path: readonly string[]}
+    | {readonly kind: 'context'; readonly field: 'contract'}
+    | {readonly kind: 'context'; readonly field: 'blockNum' | 'blockTimeMs'; readonly format: 'decimal'};
+}
+export interface ContextualProjectionPolicy {
+  readonly preserveOnReplace: readonly string[];
+  readonly onAbsent: 'delete' | 'incomplete';
+}
+export interface ContextualProjectionDefinition extends Omit<ProjectionDefinition, 'schemaVersion' | 'fields'>,
+  ContextualProjectionPolicy {
+  readonly schemaVersion: 2;
+  readonly fields: readonly ContextualProjectionField[];
+}
+/** Host-supplied original facts, never canonical/ABI/readiness authority by themselves. */
+export interface ContextualProjectionContext {
+  readonly binding: ProjectionBinding;
+  readonly block: ProjectionBlock;
+  readonly source: {readonly contract: string; readonly table: string; readonly blockTimeMs: number};
+}
+export type ContextualProjectionMutation = ProjectionMutation
+  | {readonly kind: 'put-preserving'; readonly key: string; readonly value: ProjectionRecord;
+    readonly preserveFields: readonly string[]};
+export type ContextualProjectionChange =
+  | {readonly key: string; readonly present: true; readonly value: unknown}
+  | {readonly key: string; readonly present: false};
+export interface ContextualProjectionApplyRequest extends ContextualProjectionContext {
+  readonly previous: ProjectionCheckpoint;
+  readonly policy: ContextualProjectionPolicy;
+  readonly mutations: readonly ContextualProjectionMutation[];
+}
+export const CONTEXTUAL_PROJECTION_HOST_CAPABILITIES = Object.freeze([
+  'original-source-context', 'contextual-scalar-mapping', 'declared-absence-policy',
+] as const);
+export const CONTEXTUAL_PROJECTION_ADAPTER_CAPABILITIES = Object.freeze([
+  ...PROJECTION_CAPABILITIES, 'preserving-replacement',
+] as const);
+export interface ContextualProjectionHostCapabilities {
+  readonly family: 'contextual-table'; readonly interfaceVersion: 1;
+  readonly supported: readonly typeof CONTEXTUAL_PROJECTION_HOST_CAPABILITIES[number][];
+}
+export interface ContextualProjectionAdapterCapabilities {
+  readonly family: 'contextual-table'; readonly interfaceVersion: 1;
+  readonly supported: readonly typeof CONTEXTUAL_PROJECTION_ADAPTER_CAPABILITIES[number][];
+}
+export interface ContextualProjectionActivation {
+  readonly definition: ContextualProjectionDefinition;
+  readonly binding: ProjectionBinding;
+  readonly hostCapabilities: ContextualProjectionHostCapabilities;
+  readonly adapterCapabilities: ContextualProjectionAdapterCapabilities;
+}
+/** Independent opt-in. Atomic preservation is an adapter obligation, not a claim made by validators. */
+export interface ContextualProjectionAdapter {
+  readonly capabilities: ContextualProjectionAdapterCapabilities;
+  initialize(definition: ContextualProjectionDefinition, binding: ProjectionBinding,
+    genesis: ProjectionCheckpoint): Promise<ProjectionReadView>;
+  open(binding: ProjectionBinding): Promise<ProjectionReadView>;
+  recovery?(binding: ProjectionBinding): Promise<ProjectionRecoveryView>;
+  apply(request: ContextualProjectionApplyRequest): Promise<ProjectionApplyResult>;
+  markIncomplete(binding: ProjectionBinding, failedBlock: ProjectionBlock, reason: string): Promise<void>;
+  query(view: ProjectionReadView, query: ProjectionQuery): Promise<ProjectionQueryResult>;
+}
+
+/** Storage field/type validation only. This v1 view is never executed against a source row. */
+function contextualRecordDefinition(definition: ContextualProjectionDefinition): ProjectionDefinition {
+  return {schemaVersion: 1, id: definition.id, mappingRevision: definition.mappingRevision, source: definition.source,
+    fields: definition.fields.map(field => ({name: field.name, type: field.type,
+      path: field.source.kind === 'row' ? field.source.path : ['context']})), initialization: definition.initialization};
+}
+function preservationShape(input: unknown, path: string, fields?: readonly string[]): void {
+  check(Array.isArray(input) && input.length <= PROJECTION_LIMITS.fields, path, 'Expected a bounded preservation field list');
+  const seen = new Set<string>();
+  for (const [index, name] of input.entries()) {
+    check(typeof name === 'string' && fieldName.test(name) && !forbiddenPath.has(name)
+      && (fields === undefined || fields.includes(name)) && !seen.has(name), `${path}/${index}`,
+      'Preservation fields must be declared and duplicate-free');
+    seen.add(name);
+  }
+}
+function contextualDefinitionShape(input: unknown): void {
+  const value = record(input, '');
+  keys(value, ['schemaVersion', 'id', 'mappingRevision', 'source', 'fields', 'initialization', 'preserveOnReplace', 'onAbsent']);
+  check(value.schemaVersion === 2, '/schemaVersion', 'Expected contextual definition schemaVersion 2');
+  check(Array.isArray(value.fields) && value.fields.length > 0 && value.fields.length <= PROJECTION_LIMITS.fields,
+    '/fields', 'Expected a bounded nonempty contextual field list');
+  for (const [index, inputField] of value.fields.entries()) {
+    const path = `/fields/${index}`, field = record(inputField, path);
+    keys(field, ['name', 'type', 'source'], [], path);
+    const source = record(field.source, `${path}/source`);
+    if (source.kind === 'row') keys(source, ['kind', 'path'], [], `${path}/source`);
+    else {
+      check(source.kind === 'context', `${path}/source/kind`, 'Expected row or context field source');
+      check(field.type === 'string', `${path}/type`, 'Context fields require exact string representation');
+      if (source.field === 'contract') keys(source, ['kind', 'field'], [], `${path}/source`);
+      else {
+        keys(source, ['kind', 'field', 'format'], [], `${path}/source`);
+        check(source.field === 'blockNum' || source.field === 'blockTimeMs', `${path}/source/field`, 'Unsupported context field');
+        check(source.format === 'decimal', `${path}/source/format`, 'Expected exact decimal formatting');
+      }
+    }
+  }
+  definitionShape(contextualRecordDefinition(value as unknown as ContextualProjectionDefinition));
+  preservationShape(value.preserveOnReplace, '/preserveOnReplace', value.fields.map(field => (field as {name: string}).name));
+  check(value.onAbsent === 'delete' || value.onAbsent === 'incomplete', '/onAbsent', 'Expected explicit delete or incomplete policy');
+}
+export function validateContextualProjectionDefinition(input: unknown): ProjectionValidationResult<ContextualProjectionDefinition> {
+  return validating(input, contextualDefinitionShape);
+}
+export function validateContextualProjectionBinding(definition: unknown, input: unknown): ProjectionValidationResult<ProjectionBinding> {
+  const selected = validateContextualProjectionDefinition(definition);
+  return selected.valid ? validating(input, copy => bindingShape(copy, contextualRecordDefinition(selected.value))) : selected;
+}
+function contextualCapabilitiesShape(input: unknown, required: readonly string[], path: string): void {
+  const value = record(input, path);
+  keys(value, ['family', 'interfaceVersion', 'supported'], [], path);
+  check(value.family === 'contextual-table' && value.interfaceVersion === 1, path, 'Unsupported contextual capability family/version');
+  check(Array.isArray(value.supported) && value.supported.length <= required.length, `${path}/supported`, 'Expected bounded contextual capabilities');
+  const seen = new Set<string>();
+  for (const item of value.supported) {
+    check(typeof item === 'string' && required.includes(item) && !seen.has(item), `${path}/supported`, 'Unknown or duplicate capability');
+    seen.add(item);
+  }
+  for (const item of required) if (!seen.has(item)) fail(`${path}/supported`, `Required capability ${item} is unavailable`, 'projection.capability-unavailable');
+}
+/** Pure negotiation. Hosts call this before imports, initialization or native storage effects. */
+export function validateContextualProjectionActivation(definition: unknown, binding: unknown,
+  hostCapabilities: unknown, adapterCapabilities: unknown): ProjectionValidationResult<ContextualProjectionActivation> {
+  return validating({definition, binding, hostCapabilities, adapterCapabilities}, copy => {
+    const value = record(copy, '');
+    contextualDefinitionShape(value.definition);
+    bindingShape(value.binding, contextualRecordDefinition(value.definition as ContextualProjectionDefinition), '/binding');
+    contextualCapabilitiesShape(value.hostCapabilities, CONTEXTUAL_PROJECTION_HOST_CAPABILITIES, '/hostCapabilities');
+    contextualCapabilitiesShape(value.adapterCapabilities, CONTEXTUAL_PROJECTION_ADAPTER_CAPABILITIES, '/adapterCapabilities');
+  });
+}
+function contextualContextShape(input: unknown, definition?: ContextualProjectionDefinition): void {
+  const value = record(input, '');
+  keys(value, ['binding', 'block', 'source']);
+  bindingShape(value.binding, definition === undefined ? undefined : contextualRecordDefinition(definition), '/binding');
+  checkpointShape(value.block, '/block', true);
+  const source = record(value.source, '/source');
+  keys(source, ['contract', 'table', 'blockTimeMs'], [], '/source');
+  string(source.contract, '/source/contract'); string(source.table, '/source/table');
+  integer(source.blockTimeMs, '/source/blockTimeMs', 0);
+  if (definition) {
+    check(source.contract === definition.source.contract && source.table === definition.source.table,
+      '/source', 'Original context differs from the configured contract/table');
+  }
+}
+export function validateContextualProjectionContext(definition: unknown, input: unknown): ProjectionValidationResult<ContextualProjectionContext> {
+  const selected = validateContextualProjectionDefinition(definition);
+  return selected.valid ? validating(input, copy => contextualContextShape(copy, selected.value)) : selected;
+}
+/** Pure mapping. Context remains outside the untrusted decoded row; no clock or database is read. */
+export function projectContextualTableChange(definition: unknown, context: unknown,
+  input: unknown): ProjectionValidationResult<ContextualProjectionMutation> {
+  const selected = validateContextualProjectionDefinition(definition);
+  if (!selected.valid) return selected;
+  const captured = validateContextualProjectionContext(selected.value, context);
+  if (!captured.valid) return captured;
+  const change = validating<ContextualProjectionChange>(input, copy => {
+    const value = record(copy, '');
+    check(typeof value.present === 'boolean', '/present', 'Expected explicit row presence');
+    keys(value, value.present ? ['key', 'present', 'value'] : ['key', 'present']);
+    string(value.key, '/key', PROJECTION_LIMITS.keyBytes);
+  });
+  if (!change.valid) return change;
+  try {
+    const {key} = change.value;
+    if (!change.value.present) {
+      if (selected.value.onAbsent === 'incomplete') fail('/present', 'Absent source row leaves this projection incomplete', 'projection.incomplete');
+      return {valid: true, value: freeze({kind: 'delete', key})};
+    }
+    const row = record(change.value.value, '/value'), output: Record<string, ProjectionScalar> = Object.create(null);
+    const base = contextualRecordDefinition(selected.value);
+    const rowFields = base.fields.filter((_field, index) => selected.value.fields[index]!.source.kind === 'row');
+    if (rowFields.length) {
+      const mapped = projectTableValue({...base, fields: rowFields}, row);
+      if (!mapped.valid) return mapped;
+      Object.assign(output, mapped.value);
+    }
+    for (const field of selected.value.fields) if (field.source.kind === 'context') {
+      output[field.name] = field.source.field === 'contract' ? captured.value.source.contract
+        : String(field.source.field === 'blockNum' ? captured.value.block.blockNum : captured.value.source.blockTimeMs);
+    }
+    recordShape(output, '/value', base);
+    const mutation: ContextualProjectionMutation = selected.value.preserveOnReplace.length
+      ? {kind: 'put-preserving', key, value: output, preserveFields: selected.value.preserveOnReplace}
+      : {kind: 'put', key, value: output};
+    return {valid: true, value: freeze(mutation)};
+  } catch (error) {return {valid: false, errors: [caught(error)]};}
+}
+
+function contextualMutationShape(input: unknown, definition?: ContextualProjectionDefinition): void {
+  const mutation = record(input, '/mutation');
+  check(['put', 'delete', 'put-preserving'].includes(mutation.kind as string), '/mutation/kind', 'Unsupported contextual mutation');
+  keys(mutation, mutation.kind === 'delete' ? ['kind', 'key'] : mutation.kind === 'put'
+    ? ['kind', 'key', 'value'] : ['kind', 'key', 'value', 'preserveFields'], [], '/mutation');
+  string(mutation.key, '/mutation/key', PROJECTION_LIMITS.keyBytes);
+  if (mutation.kind === 'delete') {
+    if (definition) check(definition.onAbsent === 'delete', '/mutation/kind', 'Definition rejects absent source rows');
+    return;
+  }
+  recordShape(mutation.value, '/mutation/value', definition === undefined ? undefined : contextualRecordDefinition(definition));
+  if (mutation.kind === 'put-preserving') {
+    preservationShape(mutation.preserveFields, '/mutation/preserveFields', Object.keys(mutation.value as object));
+    check((mutation.preserveFields as string[]).length > 0, '/mutation/preserveFields', 'Preserving replacement requires at least one field');
+  }
+  if (definition) {
+    check(definition.preserveOnReplace.length ? mutation.kind === 'put-preserving' : mutation.kind === 'put',
+      '/mutation/kind', 'Replacement kind differs from the declared policy');
+    if (mutation.kind === 'put-preserving') check(canonical(mutation.preserveFields) === canonical(definition.preserveOnReplace),
+      '/mutation/preserveFields', 'Replacement must preserve the exact declared field list');
+  }
+}
+
+/**
+ * Pure reference semantics, not a read or write grant. An adapter must resolve each operation against
+ * its current transactional record, in mutation-array order, and atomically persist effects/progress.
+ * Keep the original operation for replay identity; never replace it with this prior-state merge.
+ */
+export function resolveContextualProjectionMutation(definition: unknown, mutation: unknown,
+  previous: unknown): ProjectionValidationResult<ProjectionRecord | null> {
+  const selected = validateContextualProjectionDefinition(definition);
+  if (!selected.valid) return selected;
+  const captured = validating<{mutation: ContextualProjectionMutation; previous: ProjectionRecord | null}>(
+    {mutation, previous}, copy => {
+      const value = record(copy, '');
+      contextualMutationShape(value.mutation, selected.value);
+      if (value.previous !== null) recordShape(value.previous, '/previous', contextualRecordDefinition(selected.value));
+    });
+  if (!captured.valid) return captured;
+  const operation = captured.value.mutation;
+  if (operation.kind === 'delete') return {valid: true, value: null};
+  const result = {...operation.value};
+  if (operation.kind === 'put-preserving' && captured.value.previous !== null) {
+    for (const field of operation.preserveFields) result[field] = captured.value.previous[field]!;
+  }
+  try {
+    recordShape(result, '/value', contextualRecordDefinition(selected.value));
+    return {valid: true, value: freeze(result)};
+  } catch (error) {return {valid: false, errors: [caught(error)]};}
+}
+
+function contextualApplyShape(input: unknown, definition?: ContextualProjectionDefinition): void {
+  const value = record(input, '');
+  keys(value, ['binding', 'block', 'source', 'previous', 'policy', 'mutations']);
+  contextualContextShape({binding: value.binding, block: value.block, source: value.source}, definition);
+  const policy = record(value.policy, '/policy');
+  keys(policy, ['preserveOnReplace', 'onAbsent'], [], '/policy');
+  preservationShape(policy.preserveOnReplace, '/policy/preserveOnReplace', definition?.fields.map(field => field.name));
+  check(policy.onAbsent === 'delete' || policy.onAbsent === 'incomplete', '/policy/onAbsent', 'Expected explicit absence policy');
+  if (definition) check(canonical(policy) === canonical({preserveOnReplace: definition.preserveOnReplace, onAbsent: definition.onAbsent}),
+    '/policy', 'Apply policy differs from the immutable definition');
+  check(Array.isArray(value.mutations) && value.mutations.length <= PROJECTION_LIMITS.mutations,
+    '/mutations', 'Expected a bounded ordered mutation list');
+  for (const mutation of value.mutations) {
+    contextualMutationShape(mutation, definition);
+    const item = mutation as ContextualProjectionMutation;
+    if (item.kind === 'delete') check(policy.onAbsent === 'delete', '/mutations', 'Policy rejects absent source rows');
+    else check((policy.preserveOnReplace as string[]).length ? item.kind === 'put-preserving'
+      && canonical(item.preserveFields) === canonical(policy.preserveOnReplace) : item.kind === 'put',
+    '/mutations', 'Mutation differs from its captured replacement policy');
+  }
+  // Reuse exact v1 adjacency, key, record and mutation-budget validation; do not execute this view.
+  applyShape({binding: value.binding, block: value.block, previous: value.previous,
+    mutations: value.mutations.map(mutation => {
+      const item = mutation as ContextualProjectionMutation;
+      return item.kind === 'put-preserving' ? {kind: 'put', key: item.key, value: item.value} : item;
+    })}, definition === undefined ? undefined : contextualRecordDefinition(definition));
+}
+/** Capture before any adapter definition lookup or I/O. */
+export function validateContextualProjectionApplyInput(input: unknown): ProjectionValidationResult<ContextualProjectionApplyRequest> {
+  return validating(input, copy => contextualApplyShape(copy));
+}
+export function validateContextualProjectionApply(definition: unknown,
+  input: unknown): ProjectionValidationResult<ContextualProjectionApplyRequest> {
+  const selected = validateContextualProjectionDefinition(definition);
+  return selected.valid ? validating(input, copy => contextualApplyShape(copy, selected.value)) : selected;
+}
+/** Original logical candidate/policy/source, never the prior-state-dependent resolved record. */
+export function canonicalContextualProjectionBatch(input: unknown): string {
+  return canonical(unwrap(validateContextualProjectionApplyInput(input)));
+}
+/** Reuse the existing equality/keyset/count vocabulary without extending the query language. */
+export function validateContextualProjectionQuery(definition: unknown, input: unknown): ProjectionValidationResult<ProjectionQuery> {
+  const selected = validateContextualProjectionDefinition(definition);
+  return selected.valid ? validating(input, copy => queryShape(copy, contextualRecordDefinition(selected.value))) : selected;
+}

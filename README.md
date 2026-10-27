@@ -92,6 +92,11 @@ The additive [retained-checkpoint inspection](docs/projection-recovery.md) lets 
 adapter's bounded applied branch under its current revision. Its separate capability manifest
 leaves both existing interfaces unchanged. Inspection supplies no canonical or serving authority.
 
+The separate opt-in [contextual scalar mapping](docs/projection-contextual.md) family adds original
+contract/block/time context, explicit absence policy and a distinct preserving replacement operation.
+Existing v1 contracts stay unchanged. Pure helpers and capability negotiation do not qualify runtime,
+database atomicity, source authority or production rollback; those remain linked host/adapter work.
+
 ## Remaining foundation work
 
 Track [SDK issue #1](https://github.com/eosrio/hyperion-sdk/issues/1) and

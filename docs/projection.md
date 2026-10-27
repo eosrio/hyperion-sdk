@@ -5,6 +5,9 @@ not a stable SDK release or complete Hyperion 4.5 projection lifecycle. The pack
 The same definition, mutations and logical query are consumed by backend adapters without native
 database operations in the definition or Hyperion's generic runtime.
 
+This page describes the unchanged v1 family. The additive [contextual mapping family](projection-contextual.md)
+has separate definitions/capabilities and preserving replacements; v1 validators do not accept it.
+
 ## Ownership and activation
 
 Import contracts and pure validators from `@eosrio/hyperion-sdk/projection` or the root export.
