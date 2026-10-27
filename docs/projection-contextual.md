@@ -42,6 +42,9 @@ validators produce detached recursively frozen inert JSON; they do not load code
 The contextual definition version, contextual capability-interface version, rollback-interface version
 and SDK package major are separate identities. A schemaVersion2 declaration does not activate the
 existing rollback interface. Existing v1 objects/consumers remain usable and reject contextual syntax.
+The separate [contextual recovery family](projection-contextual-recovery.md) explicitly negotiates
+revision-fenced contextual apply and the existing resumable rollback lifecycle without widening either
+basic family or erasing contextual replay identity.
 
 ## Original source context and mapping
 

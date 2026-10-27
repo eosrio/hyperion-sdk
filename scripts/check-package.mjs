@@ -21,7 +21,7 @@ try {
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   assert.equal(pkg.private, true, 'Foundation remains unpublished development work');
   const tarball = join(temporary, `eosrio-hyperion-sdk-${pkg.version}.tgz`);
-  runNpm(['install', '--ignore-scripts', '--no-audit', '--no-fund', tarball], consumer);
+  runNpm(['install', '--no-audit', '--no-fund', tarball], consumer);
   await writeFile(join(consumer, 'consumer.mts'), `
 import { validateComponentManifest, checkCompatibility, type ComponentManifest } from '@eosrio/hyperion-sdk';
 import { validateProtocolSelection, type ProtocolProvider, type ProtocolDescriptor, type ProtocolNormalizedDelta } from '@eosrio/hyperion-sdk/protocol';
@@ -62,11 +62,13 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
     await readFile(join(root, 'tests/consumers/projection-recovery.mts'), 'utf8'));
   await writeFile(join(consumer, 'projection-contextual.mts'),
     await readFile(join(root, 'tests/consumers/projection-contextual.mts'), 'utf8'));
+  await writeFile(join(consumer, 'projection-contextual-recovery.mts'),
+    await readFile(join(root, 'tests/consumers/projection-contextual-recovery.mts'), 'utf8'));
   // No @types/node dependency is needed by the consumer; declarations must be independently usable.
   execFileSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '--strict',
     '--target', 'ES2022', '--module', 'NodeNext', '--resolveJsonModule', 'consumer.mts',
     'protocol-abi-observations.mts', 'protocol-native-actions.mts', 'projection.mts', 'projection-rollback.mts',
-    'projection-recovery.mts', 'projection-contextual.mts'], { cwd: consumer, stdio: 'inherit' });
+    'projection-recovery.mts', 'projection-contextual.mts', 'projection-contextual-recovery.mts'], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'consumer.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'protocol-abi-observations.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'protocol-native-actions.mjs')], { cwd: consumer, stdio: 'inherit' });
@@ -74,6 +76,7 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
   execFileSync(process.execPath, [join(consumer, 'projection-rollback.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'projection-recovery.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'projection-contextual.mjs')], { cwd: consumer, stdio: 'inherit' });
+  execFileSync(process.execPath, [join(consumer, 'projection-contextual-recovery.mjs')], { cwd: consumer, stdio: 'inherit' });
   console.log('Packed ESM, JSON Schema and TypeScript consumer passed.');
 } finally {
   await rm(temporary, { recursive: true, force: true });
