@@ -102,6 +102,11 @@ the complete contextual batch under a persisted revision fence and reuses exact 
 and retained-inspection semantics. Existing ordinary/basic contextual/rollback contracts stay closed;
 SDK snapshot guards do not replace atomic engine checks or host source authority.
 
+The [stateful projection proposal](docs/projection-stateful-proposal.md) and its
+[proposed ADR](docs/adr/0001-bounded-stateful-projection-family.md) explore the additive capability
+needed by SDK #32's untemplated asset lifecycle. They define no implemented interface, export,
+accepted architecture change or qualification claim. Existing families remain unchanged.
+
 ## Remaining foundation work
 
 Track [SDK issue #1](https://github.com/eosrio/hyperion-sdk/issues/1) and
