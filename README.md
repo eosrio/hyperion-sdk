@@ -97,6 +97,11 @@ contract/block/time context, explicit absence policy and a distinct preserving r
 Existing v1 contracts stay unchanged. Pure helpers and capability negotiation do not qualify runtime,
 database atomicity, source authority or production rollback; those remain linked host/adapter work.
 
+The independently activated [contextual recovery family](docs/projection-contextual-recovery.md) keeps
+the complete contextual batch under a persisted revision fence and reuses exact rollback, coverage
+and retained-inspection semantics. Existing ordinary/basic contextual/rollback contracts stay closed;
+SDK snapshot guards do not replace atomic engine checks or host source authority.
+
 ## Remaining foundation work
 
 Track [SDK issue #1](https://github.com/eosrio/hyperion-sdk/issues/1) and

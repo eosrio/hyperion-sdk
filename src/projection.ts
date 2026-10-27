@@ -1177,3 +1177,203 @@ export function validateContextualProjectionQuery(definition: unknown, input: un
   const selected = validateContextualProjectionDefinition(definition);
   return selected.valid ? validating(input, copy => queryShape(copy, contextualRecordDefinition(selected.value))) : selected;
 }
+
+/** Separate opt-in recovery family; neither contextual-basic nor legacy manifests are widened. */
+export const CONTEXTUAL_PROJECTION_RECOVERY_HOST_CAPABILITIES = Object.freeze([
+  ...CONTEXTUAL_PROJECTION_HOST_CAPABILITIES, 'runtime-coordinated-recovery',
+] as const);
+export const CONTEXTUAL_PROJECTION_RECOVERY_ADAPTER_CAPABILITIES = Object.freeze([
+  ...CONTEXTUAL_PROJECTION_ADAPTER_CAPABILITIES, 'revision-fenced', 'fork-rollback', 'retained-checkpoints',
+] as const);
+export interface ContextualProjectionRecoveryHostCapabilities {
+  readonly family: 'contextual-table-recovery';
+  readonly interfaceVersion: 1;
+  readonly supported: readonly typeof CONTEXTUAL_PROJECTION_RECOVERY_HOST_CAPABILITIES[number][];
+}
+export interface ContextualProjectionRecoveryAdapterCapabilities {
+  readonly family: 'contextual-table-recovery';
+  readonly interfaceVersion: 1;
+  readonly supported: readonly typeof CONTEXTUAL_PROJECTION_RECOVERY_ADAPTER_CAPABILITIES[number][];
+}
+export interface ContextualProjectionRecoveryActivation {
+  readonly definition: ContextualProjectionDefinition;
+  readonly binding: ProjectionBinding;
+  readonly hostCapabilities: ContextualProjectionRecoveryHostCapabilities;
+  readonly adapterCapabilities: ContextualProjectionRecoveryAdapterCapabilities;
+}
+export interface ContextualProjectionRecoveryApplyRequest {
+  readonly revision: string;
+  readonly batch: ContextualProjectionApplyRequest;
+}
+export interface ContextualProjectionRecoveryQueryRequest {
+  readonly view: ProjectionRollbackReadView;
+  readonly query: ProjectionQuery;
+}
+/**
+ * Explicit opt-in only. Reuse the existing exact revision/coverage/recovery DTOs, but never route
+ * contextual batches through legacy apply. initialize persists the full contextual definition and
+ * prevents legacy/basic access from bypassing this instance's policy and revision fence.
+ *
+ * Every mutable operation checks its captured revision against current durable state. Apply keeps
+ * the original contextual candidate/policy/source/order for replay identity and resolves preserving
+ * mutations against current records in transaction order, atomically with checkpoint, receipt and
+ * required undo. Undo restores the pre-block state, including absent records and required nulls.
+ * Unknown commits stay incomplete until exact original-batch recovery. No method invents context.
+ *
+ * rollback admits, advances and completes the existing resumable recovery operation: rotate the
+ * revision durably before undo, preserve exact sourceRevision/operation/from/ancestor retries,
+ * and durably mark unavailable ancestry. Completion alone grants no serving/canonical authority.
+ * Query requires one coherent ready snapshot and the exact captured revision/checkpoint. Returning
+ * DTOs or passing validators supplies no engine atomicity, source authority or production activation.
+ */
+export interface ContextualProjectionRecoveryAdapter {
+  readonly capabilities: ContextualProjectionRecoveryAdapterCapabilities;
+  initialize(definition: ContextualProjectionDefinition, binding: ProjectionBinding,
+    genesis: ProjectionCheckpoint): Promise<ProjectionRollbackReadView>;
+  open(binding: ProjectionBinding): Promise<ProjectionRollbackReadView>;
+  recovery(binding: ProjectionBinding): Promise<ProjectionRollbackRecoveryView>;
+  apply(request: ContextualProjectionRecoveryApplyRequest): Promise<ProjectionRollbackApplyResult>;
+  markIncomplete(request: ProjectionRollbackIncompleteRequest): Promise<void>;
+  rollback(request: ProjectionRollbackRequest): Promise<ProjectionRollbackResult>;
+  retainedCheckpoints(request: ProjectionRetainedCheckpointRequest): Promise<ProjectionRetainedCheckpointView>;
+  query(view: ProjectionRollbackReadView, query: ProjectionQuery): Promise<ProjectionRollbackQueryResult>;
+}
+function contextualRecoveryCapabilitiesShape(input: unknown, required: readonly string[], path: string): void {
+  const value = record(input, path);
+  keys(value, ['family', 'interfaceVersion', 'supported'], [], path);
+  check(value.family === 'contextual-table-recovery' && value.interfaceVersion === 1,
+    path, 'Unsupported contextual recovery capability family/version');
+  check(Array.isArray(value.supported) && value.supported.length <= required.length,
+    `${path}/supported`, 'Expected bounded contextual recovery capabilities');
+  const seen = new Set<string>();
+  for (const item of value.supported) {
+    check(typeof item === 'string' && required.includes(item) && !seen.has(item),
+      `${path}/supported`, 'Unknown or duplicate capability');
+    seen.add(item);
+  }
+  for (const item of required) if (!seen.has(item)) {
+    fail(`${path}/supported`, `Required capability ${item} is unavailable`, 'projection.capability-unavailable');
+  }
+}
+/** Pure negotiation before imports or effects. Capability labels confer no execution authority. */
+export function validateContextualProjectionRecoveryActivation(definition: unknown, binding: unknown,
+  hostCapabilities: unknown, adapterCapabilities: unknown): ProjectionValidationResult<ContextualProjectionRecoveryActivation> {
+  return validating({definition, binding, hostCapabilities, adapterCapabilities}, copy => {
+    const value = record(copy, '');
+    contextualDefinitionShape(value.definition);
+    bindingShape(value.binding, contextualRecordDefinition(value.definition as ContextualProjectionDefinition), '/binding');
+    contextualRecoveryCapabilitiesShape(value.hostCapabilities, CONTEXTUAL_PROJECTION_RECOVERY_HOST_CAPABILITIES, '/hostCapabilities');
+    contextualRecoveryCapabilitiesShape(value.adapterCapabilities, CONTEXTUAL_PROJECTION_RECOVERY_ADAPTER_CAPABILITIES, '/adapterCapabilities');
+  });
+}
+function contextualRecoveryApplyShape(input: unknown, definition?: ContextualProjectionDefinition): void {
+  const value = record(input, '');
+  keys(value, ['revision', 'batch']);
+  hash(value.revision, '/revision');
+  contextualApplyShape(value.batch, definition);
+}
+/** Detached capture before awaiting the durable definition/current revision lookup. */
+export function validateContextualProjectionRecoveryApplyInput(input: unknown): ProjectionValidationResult<ContextualProjectionRecoveryApplyRequest> {
+  return validating(input, copy => contextualRecoveryApplyShape(copy));
+}
+function contextualRecoveryCurrent(input: unknown, binding: ProjectionBinding, revision: string): ProjectionRollbackRecoveryView {
+  const current = unwrap(validateProjectionRollbackRecovery(input));
+  check(canonical(current.binding) === canonical(binding), '/current/binding', 'Recovery snapshot belongs to another binding');
+  if (current.revision !== revision) fail('/revision', 'Persisted projection revision differs', 'projection.stale-revision');
+  return current;
+}
+function contextualRecoveryWriter(current: ProjectionRollbackRecoveryView): void {
+  if (!current.initialized) fail('/current/initialized', 'Initialization has not completed', 'projection.not-initialized');
+  if (current.rollback && current.rollback.status !== 'complete') {
+    fail('/current/rollback', 'Recovery has not completed', 'projection.incomplete');
+  }
+}
+/**
+ * Check against an adapter-supplied durable snapshot. This pure check grants no authority:
+ * adapters must recheck its revision/phase atomically with effects and original-batch receipts.
+ * Pending/gap states permit exact source recovery; digest/ancestry admission remains adapter work.
+ */
+export function validateContextualProjectionRecoveryApply(definition: unknown, input: unknown,
+  current: unknown): ProjectionValidationResult<ContextualProjectionRecoveryApplyRequest> {
+  const selected = validateContextualProjectionDefinition(definition);
+  if (!selected.valid) return selected;
+  const checked = validating<{request: ContextualProjectionRecoveryApplyRequest; current: ProjectionRollbackRecoveryView}>(
+    {request: input, current}, copy => {
+      const value = record(copy, '');
+      contextualRecoveryApplyShape(value.request, selected.value);
+      const request = value.request as ContextualProjectionRecoveryApplyRequest;
+      contextualRecoveryWriter(contextualRecoveryCurrent(value.current, request.batch.binding, request.revision));
+    });
+  return checked.valid ? {valid: true, value: checked.value.request} : checked;
+}
+/** Failure admission needs exact block identity, not a fabricated contextual batch or source time. */
+export function validateContextualProjectionRecoveryIncomplete(input: unknown,
+  current: unknown): ProjectionValidationResult<ProjectionRollbackIncompleteRequest> {
+  const checked = validating<{request: ProjectionRollbackIncompleteRequest; current: ProjectionRollbackRecoveryView}>(
+    {request: input, current}, copy => {
+      const value = record(copy, '');
+      const request = unwrap(validateProjectionRollbackIncomplete(value.request));
+      contextualRecoveryWriter(contextualRecoveryCurrent(value.current, request.binding, request.revision));
+    });
+  return checked.valid ? {valid: true, value: checked.value.request} : checked;
+}
+/**
+ * Reuse the existing admission/continuation/completion protocol. Only an exact retained operation
+ * may use its original sourceRevision after rotation; maxBlocks is a scheduling budget, not identity.
+ * Actual ancestry/undo availability and durable unavailable admission remain adapter obligations.
+ */
+export function validateContextualProjectionRecoveryRollback(input: unknown,
+  current: unknown): ProjectionValidationResult<ProjectionRollbackRequest> {
+  const checked = validating<{request: ProjectionRollbackRequest; current: ProjectionRollbackRecoveryView}>(
+    {request: input, current}, copy => {
+      const value = record(copy, '');
+      const request = unwrap(validateProjectionRollbackRequest(value.request));
+      const state = unwrap(validateProjectionRollbackRecovery(value.current));
+      check(canonical(state.binding) === canonical(request.binding), '/current/binding', 'Recovery snapshot belongs to another binding');
+      if (state.rollback?.operationId === request.operationId) {
+        const operation = state.rollback;
+        if (operation.sourceRevision !== request.revision || !sameCheckpoint(operation.from, request.from)
+          || !sameCheckpoint(operation.ancestor, request.ancestor)) {
+          fail('/request', 'Recovery operation identity was reused with different intent', 'projection.conflicting-replay');
+        }
+        if (operation.status === 'unavailable') fail('/current/rollback', operation.reason!, 'projection.rollback-unavailable');
+      } else {
+        contextualRecoveryWriter(contextualRecoveryCurrent(state, request.binding, request.revision));
+        if (!sameCheckpoint(state.checkpoint, request.from)) {
+          fail('/from', 'Recovery must start at the exact completed checkpoint', 'projection.stale-view');
+        }
+      }
+    });
+  return checked.valid ? {valid: true, value: checked.value.request} : checked;
+}
+/** Capture the unchanged logical query and require a coherent, ready, exact fenced read context. */
+export function validateContextualProjectionRecoveryQuery(definition: unknown, view: unknown, query: unknown,
+  current: unknown): ProjectionValidationResult<ContextualProjectionRecoveryQueryRequest> {
+  const selected = validateContextualProjectionDefinition(definition);
+  if (!selected.valid) return selected;
+  const checked = validating<ContextualProjectionRecoveryQueryRequest & {current: ProjectionRollbackRecoveryView}>(
+    {view, query, current}, copy => {
+      const value = record(copy, '');
+      const captured = unwrap(validateProjectionRollbackView(value.view));
+      bindingShape(captured.binding, contextualRecordDefinition(selected.value), '/view/binding');
+      queryShape(value.query, contextualRecordDefinition(selected.value));
+      const state = contextualRecoveryCurrent(value.current, captured.binding, captured.revision);
+      contextualRecoveryWriter(state);
+      if (state.pending !== null || state.gap !== null) fail('/current', 'Source work is incomplete', 'projection.incomplete');
+      if (!sameCheckpoint(state.checkpoint, captured.checkpoint)) {
+        fail('/view/checkpoint', 'Read view differs from the exact completed checkpoint', 'projection.stale-view');
+      }
+    });
+  return checked.valid ? {valid: true, value: freeze({view: checked.value.view, query: checked.value.query})} : checked;
+}
+/** Inspection is permitted during incomplete/recovery phases, but never under a stale revision. */
+export function validateContextualProjectionRecoveryRetainedRequest(input: unknown,
+  current: unknown): ProjectionValidationResult<ProjectionRetainedCheckpointRequest> {
+  const checked = validating<{request: ProjectionRetainedCheckpointRequest; current: ProjectionRollbackRecoveryView}>(
+    {request: input, current}, copy => {
+      const value = record(copy, '');
+      const request = unwrap(validateProjectionRetainedCheckpointRequest(value.request));
+      contextualRecoveryCurrent(value.current, request.binding, request.revision);
+    });
+  return checked.valid ? {valid: true, value: checked.value.request} : checked;
+}
