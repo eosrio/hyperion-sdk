@@ -1,12 +1,14 @@
 # Proposed bounded stateful projection contract
 
-Status: **proposed for review; not accepted, implemented, exported or qualified**.
+Status: **architecture proposed; executable SDK development candidate, no host/engine qualification**.
 This is [SDK #32](https://github.com/eosrio/hyperion-sdk/issues/32), prerequisite to
 [HAPI #366](https://github.com/eosrio/hyperion-history-api/issues/366) and
 [plugin #10](https://github.com/eosrio/hyperion-atomicassets-plugin/issues/10).
 The [proposed ADR](adr/0001-bounded-stateful-projection-family.md) records the trade-off;
 [terms](../CONTEXT.md) distinguish source occurrences, staging and completed state.
-Names and bounds below are proposal vocabulary, not available imports or metadata to activate today.
+The [development contract](projection-stateful.md) identifies the implemented opt-in SDK seam and
+reference conformance evidence. The broader proposal is not adopted by these exports; installed
+hosts/adapters do not gain support, and illustrative bounds below select no production values.
 
 ## Evidence and the smallest addition
 

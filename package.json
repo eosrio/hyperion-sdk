@@ -10,6 +10,7 @@
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
     "./protocol": { "types": "./dist/protocol.d.ts", "import": "./dist/protocol.js" },
     "./projection": { "types": "./dist/projection.d.ts", "import": "./dist/projection.js" },
+    "./projection-stateful": { "types": "./dist/projection-stateful.d.ts", "import": "./dist/projection-stateful.js" },
     "./examples/table-projection": { "types": "./dist/examples/table-projection.d.ts", "import": "./dist/examples/table-projection.js" },
     "./component-manifest.schema.json": "./dist/component-manifest.schema.json"
   },
@@ -17,7 +18,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "bun check -p tsconfig.json",
-    "test": "npm run build && node --test tests/manifest.test.mjs tests/compatibility.test.mjs tests/protocol.test.mjs tests/protocol-native-actions.test.mjs tests/projection.test.mjs tests/projection-rollback.test.mjs tests/projection-recovery.test.mjs tests/contextual-projection.test.mjs tests/contextual-projection-recovery.test.mjs tests/structured-values.test.mjs",
+    "test": "npm run build && node --test tests/manifest.test.mjs tests/compatibility.test.mjs tests/protocol.test.mjs tests/protocol-native-actions.test.mjs tests/projection.test.mjs tests/projection-rollback.test.mjs tests/projection-recovery.test.mjs tests/contextual-projection.test.mjs tests/contextual-projection-recovery.test.mjs tests/structured-values.test.mjs tests/stateful-projection.test.mjs",
     "test:package": "node scripts/check-package.mjs",
     "check:docs": "python scripts/check-docs.py",
     "prepare": "npm run build"

@@ -9,7 +9,9 @@ date: 2026-10-27
 action/table inputs and related records at one view. Propose one separately negotiated compound
 projection family, described in the [contract proposal](../projection-stateful-proposal.md).
 Keep existing scalar/contextual validators, operations and installed consumers unchanged.
-This ADR is not accepted, implemented, exported or qualified.
+This ADR remains proposed. An executable [SDK development candidate](../projection-stateful.md)
+now implements capture/reduction/coherent-read/custody and conformance seams. No architecture
+acceptance, installed host/backend support, production activation or engine qualification is implied.
 
 The plugin performs a bounded deterministic reduction with exact-key reads and block-local staging.
 The runtime admits original inputs and owns ordering, failure isolation and canonical recovery.

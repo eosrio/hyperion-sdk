@@ -104,8 +104,10 @@ SDK snapshot guards do not replace atomic engine checks or host source authority
 
 The [stateful projection proposal](docs/projection-stateful-proposal.md) and its
 [proposed ADR](docs/adr/0001-bounded-stateful-projection-family.md) explore the additive capability
-needed by SDK #32's untemplated asset lifecycle. They define no implemented interface, export,
-accepted architecture change or qualification claim. Existing families remain unchanged.
+needed by SDK #32's untemplated asset lifecycle. The explicit opt-in
+[SDK development contract](docs/projection-stateful.md) now provides executable capture, reduction,
+coherent reads, fixed-candidate custody and adapter conformance seams. The architecture remains
+proposed; no installed backend support, activation or qualification is implied. Existing families remain unchanged.
 
 ## Remaining foundation work
 
