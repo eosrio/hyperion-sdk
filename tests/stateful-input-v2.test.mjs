@@ -9,7 +9,7 @@ const bounds=()=>limits();
 const target=()=>({schemaVersion:2,chainId:hex(1),declarationDigest:hex(2),owner:{id:'physical-owner',generation:'owner-epoch'},
   previous:{declarationDigest:hex(2),backendId:'backend',generation:'mapping-instance',revision:hex(3),
     checkpoint:{blockNum:1,blockId:hex(4)}},block:{blockNum:2,blockId:hex(5),previousBlockId:hex(4)},
-  rawSource:{selectionId:'original-selection',observationId:'original-observation',observationDigest:hex(6),captureSha256:hex(7),frameSha256:hex(8)}});
+  rawSource:{commitId:'original-commit',selectionId:'unread-original-selection',observationId:'original-observation',observationDigest:hex(6)}});
 
 test('proposed identities retain original scope/key and physical KV bytes without substitution',()=>{
   for(const input of [{kind:'contract-row',scope:'collection',primaryKey:'9007199254740993'},
@@ -45,14 +45,16 @@ test('identity traversal/key byte bounds are existing explicit limits and access
   assert.throws(()=>captureOriginalTableIdentity(value,bounds()));assert.equal(reads,0);
 });
 
-test('raw target capture needs no decoded block time/data and binds original target/owner/reference',async()=>{
+test('raw target capture needs no loaded selection, decoded block time/data and binds original references',async()=>{
   const input=target(),saved=structuredClone(input),pending=captureRawStatefulTarget(input,bounds());
-  input.rawSource.captureSha256=hex(99);input.owner.generation='later';
+  input.rawSource.selectionId='later';input.owner.generation='later';
   const captured=await pending;assert.deepEqual(captured.target,saved);assert.equal(Object.isFrozen(captured.target.rawSource),true);
   assert.match(captured.digest,/^[a-f0-9]{64}$/);assert.equal(Object.hasOwn(captured.target.block,'timeMs'),false);
   assert.equal(Object.hasOwn(captured.target,'data'),false);
+  assert.equal(Object.hasOwn(captured.target.rawSource,'captureSha256'),false);
+  assert.equal(Object.hasOwn(captured.target.rawSource,'frameSha256'),false);
   assert.equal((await captureRawStatefulTarget(saved,bounds())).digest,captured.digest);
-  for(const mutate of [v=>v.owner.generation='other',v=>v.rawSource.captureSha256=hex(9),v=>v.chainId=hex(9),
+  for(const mutate of [v=>v.owner.generation='other',v=>v.rawSource.observationDigest=hex(9),v=>v.chainId=hex(9),
     v=>v.previous.revision=hex(9),v=>{v.declarationDigest=hex(9);v.previous.declarationDigest=hex(9);}]){
     const changed=structuredClone(saved);mutate(changed);
     assert.notEqual((await captureRawStatefulTarget(changed,bounds())).digest,captured.digest);
@@ -61,7 +63,7 @@ test('raw target capture needs no decoded block time/data and binds original tar
 
 test('raw target rejects skipped/conflicting/cross-declaration and fabricated decoded fields',async()=>{
   for(const mutate of [v=>v.schemaVersion=1,v=>v.block.blockNum=3,v=>v.block.previousBlockId=hex(99),
-    v=>v.previous.declarationDigest=hex(99),v=>v.rawSource.frameSha256='bad',v=>v.block.timeMs='1',
+    v=>v.previous.declarationDigest=hex(99),v=>v.rawSource.observationDigest='bad',v=>v.block.timeMs='1',
     v=>v.data={},v=>v.owner.extra='authority',v=>delete v.rawSource.observationId]){
     const value=target();mutate(value);await assert.rejects(captureRawStatefulTarget(value,bounds()));
   }

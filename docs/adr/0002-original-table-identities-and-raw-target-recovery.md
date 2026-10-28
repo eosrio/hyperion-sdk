@@ -67,9 +67,12 @@ new SDK major; a separate opt-in interface must not be described as a compatible
 ## Proposed recovery obligations
 
 The real worker/controller retains a raw-target admission tied to its existing recovery owner:
-declaration digest, exact predecessor revision/checkpoint, canonical target, source selection,
-observation/capture references and owner generation. Stored labels are references, never source
-authority. Only the existing canonical source/ABI readers and actual owner can authorize work.
+declaration digest, exact predecessor revision/checkpoint, canonical target, certified commit,
+source selection, observation identifier/digest and owner generation. These locators are available
+before loading the original selection/capture; failure admission must not depend on that load
+succeeding or require invented capture/frame hashes. Once loaded, actual bytes/hashes must be
+verified against the certified references before decoding/reduction. Stored labels are references,
+never source authority. Only the existing canonical source/ABI readers and actual owner can authorize work.
 
 Use distinct raw-target/reference and decoded-source failure variants in the version2 recovery
 slot. A raw failure cannot claim a decoded-source digest. Failure admission must be durable even

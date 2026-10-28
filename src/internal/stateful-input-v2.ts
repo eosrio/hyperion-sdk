@@ -13,8 +13,9 @@ export interface RawStatefulTarget {
   readonly owner: {readonly id: string; readonly generation: string};
   readonly previous: StatefulView;
   readonly block: {readonly blockNum: number; readonly blockId: string; readonly previousBlockId: string};
-  readonly rawSource: {readonly selectionId: string; readonly observationId: string;
-    readonly observationDigest: string; readonly captureSha256: string; readonly frameSha256: string};
+  /** Certified locators exist before the retained selection/capture has been read successfully. */
+  readonly rawSource: {readonly commitId: string; readonly selectionId: string;
+    readonly observationId: string; readonly observationDigest: string};
 }
 export interface CapturedRawStatefulTarget {readonly target: RawStatefulTarget; readonly digest: string}
 type ObjectData = Record<string, unknown>;
@@ -78,9 +79,9 @@ export async function captureRawStatefulTarget(input: unknown, limits: StatefulL
   count(value.block.blockNum, 1); hash(value.block.blockId); hash(value.block.previousBlockId);
   check(value.block.blockNum === value.previous.checkpoint.blockNum + 1
     && value.block.previousBlockId === value.previous.checkpoint.blockId, 'Raw target is not checkpoint+1');
-  object(value.rawSource); keys(value.rawSource, ['selectionId', 'observationId', 'observationDigest', 'captureSha256', 'frameSha256']);
-  text(value.rawSource.selectionId); text(value.rawSource.observationId);
-  hash(value.rawSource.observationDigest); hash(value.rawSource.captureSha256); hash(value.rawSource.frameSha256);
+  object(value.rawSource); keys(value.rawSource, ['commitId', 'selectionId', 'observationId', 'observationDigest']);
+  text(value.rawSource.commitId); text(value.rawSource.selectionId); text(value.rawSource.observationId);
+  hash(value.rawSource.observationDigest);
   const raw = new TextEncoder().encode(canonicalStructuredJsonRecord(value, [], {...limits.envelope,
     recordBytes: Math.min(limits.envelope.recordBytes, limits.candidateBytes)}).canonical);
   const digest = Array.from(new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', raw)), byte => byte.toString(16).padStart(2, '0')).join('');
