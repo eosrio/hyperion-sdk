@@ -38,6 +38,17 @@ final inert response object across the callback, then closes its port. `readStat
 lower-level single-call batch primitive, returning explicit coverage results; endpoint composition
 must not omit the enclosing aggregate/output checks. No relationship absence can grant completeness.
 
+The additive `StatefulQueryHost` type is the request-scoped API domain port: `compose(projectionId,
+callback)` supplies the existing `StatefulQueryRead` and returns `StatefulQueryResult`. A domain
+plugin does not select a native backend, construct a serving context, publish readiness or reopen
+views per relationship. This type supplies no implementation, Fastify loader, canonical authority
+or automatic activation. HAPI #366/#191 owns the production implementation and final response gate.
+The host must refuse calls after request closure and retain source/owner, all selector ABI epochs,
+declaration, revision/checkpoint, cancellation and deadline checks through serialization and final
+publication. A returned result or its view DTO cannot authorize a later response/cache hit. The
+existing HTTP host owns shared state headers and retryable unavailability. Existing scalar consumers
+and the standalone `composeStatefulRead` helper are unchanged.
+
 Hooks own domain ordering, metadata conversion, ownership predicates and final relationship closure.
 The fixture's config10/relationship20/mint50/update60 priorities and mint-buffer flush are fixture
 code, not generic SDK scheduling. Missing coverage is `unavailable`, never an empty value or covered

@@ -106,6 +106,24 @@ export interface StatefulQueryRead {
   readonly view: StatefulView;
   get(kind: string, key: string): Promise<Exclude<StatefulRead, {status: 'unavailable'}>>;
 }
+/** A completed composition value; this DTO is not a transferable serving capability. */
+export interface StatefulQueryResult {
+  readonly view: StatefulView;
+  readonly value: StructuredRecord;
+}
+/**
+ * Request-scoped host port for domain plugins. The host selects the configured declaration,
+ * backend and eligible canonical view; plugins receive no native adapter or readiness setter.
+ * All related reads use the one supplied port. Calls after request closure must refuse.
+ *
+ * Implementations must retain source/owner/selector-ABI/declaration/view fencing through final
+ * response serialization and publication, including cancellation and the existing deadline.
+ * A fulfilled composition alone does not authorize a later cached or independently sent response.
+ * HTTP metadata, error mapping and final publication remain the existing API host's responsibility.
+ */
+export interface StatefulQueryHost {
+  compose(projectionId: string, compose: (reader: StatefulQueryRead) => Promise<StructuredRecord>): Promise<StatefulQueryResult>;
+}
 export interface StatefulReduction {
   readonly source: StatefulSource; readonly view: StatefulView;
   get(kind: string, key: string): Promise<Exclude<StatefulRead, {status: 'unavailable'}>>;

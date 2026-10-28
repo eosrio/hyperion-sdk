@@ -1,6 +1,7 @@
 import {STATEFUL_FAMILY, STATEFUL_HOST_CAPABILITIES, STATEFUL_ADAPTER_CAPABILITIES,
   negotiateStatefulProjection, canonicalStatefulRecord, type StatefulDefinition,
-  type StatefulLimits, type StatefulAdapter, type StatefulCandidateStore} from '@eosrio/hyperion-sdk/projection-stateful';
+  type StatefulLimits, type StatefulAdapter, type StatefulCandidateStore,
+  type StatefulQueryHost, type StatefulQueryResult} from '@eosrio/hyperion-sdk/projection-stateful';
 const limits: StatefulLimits = {value: {depth: 16, nodes: 1000, fields: 8, arrayElements: 32, stringBytes: 1024,
   recordBytes: 4096, integerFields: 4, pathSegments: 8},
   envelope: {depth: 32, nodes: 10000, fields: 64, arrayElements: 64, stringBytes: 4096,
@@ -21,3 +22,11 @@ let rejected=false;try{await negotiateStatefulProjection(definition,limits,host,
 if(!rejected)throw new Error('Packed missing stateful capability was accepted');
 const implementation: StatefulAdapter|null=null, custody: StatefulCandidateStore|null=null;
 void implementation;void custody;
+// Type-only domain/host boundary. No source authority or HTTP implementation is supplied here.
+async function composeDomain(query: StatefulQueryHost): Promise<StatefulQueryResult> {
+  return query.compose('packed-development', async reader => {
+    const row = await reader.get('row', 'one');
+    return {row: row.status === 'present' ? row.value : null};
+  });
+}
+void composeDomain;
