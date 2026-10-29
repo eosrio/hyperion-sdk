@@ -18,7 +18,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "bun check -p tsconfig.json",
-    "test": "npm run build && node --test tests/manifest.test.mjs tests/compatibility.test.mjs tests/protocol.test.mjs tests/protocol-native-actions.test.mjs tests/projection.test.mjs tests/projection-rollback.test.mjs tests/projection-recovery.test.mjs tests/contextual-projection.test.mjs tests/contextual-projection-recovery.test.mjs tests/structured-values.test.mjs tests/stateful-projection.test.mjs tests/stateful-input-v2.test.mjs",
+    "test": "npm run build && node --test tests/manifest.test.mjs tests/compatibility.test.mjs tests/protocol.test.mjs tests/protocol-native-actions.test.mjs tests/projection.test.mjs tests/projection-rollback.test.mjs tests/projection-recovery.test.mjs tests/contextual-projection.test.mjs tests/contextual-projection-recovery.test.mjs tests/structured-values.test.mjs tests/stateful-projection.test.mjs tests/stateful-input-v2.test.mjs tests/stateful-ownership.test.mjs",
     "test:package": "node scripts/check-package.mjs",
     "check:docs": "python scripts/check-docs.py",
     "prepare": "npm run build"

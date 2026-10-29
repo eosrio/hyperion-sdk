@@ -1,5 +1,7 @@
 import {canonicalStructuredJsonRecord, validateStructuredInteger} from './internal/structured-values.js';
 import type {StructuredRecord} from './internal/structured-values.js';
+import {isCapturedStatefulDeclaration, isNegotiatedStatefulDeclaration,
+  registerStatefulDeclaration, registerNegotiatedStatefulDeclaration} from './internal/stateful-ownership.js';
 import {PROJECTION_ROLLBACK_LIMITS, type ProjectionCheckpoint} from './projection.js';
 import type {CapturedStatefulSource, StatefulAdapter, StatefulApplyResult, StatefulCandidate,
   StatefulCandidateStore, StatefulCapabilities, StatefulDeclaration, StatefulDefinition, StatefulGuard,
@@ -12,10 +14,9 @@ export const STATEFUL_HOST_CAPABILITIES = Object.freeze(['ordered-inputs', 'sour
 export const STATEFUL_ADAPTER_CAPABILITIES = Object.freeze(['structured-records', 'coherent-keyed-reads', 'atomic-group', 'fixed-replay-receipts', 'revision-checkpoint-fence', 'bounded-undo', 'retained-inspection'] as const);
 /** Existing recovery ceilings are reused; there are no new workload or aggregate-budget defaults. */
 export const STATEFUL_RECOVERY_LIMITS = PROJECTION_ROLLBACK_LIMITS;
-const declarations = new WeakSet<object>(), negotiated = new WeakSet<object>();
 function captured(declaration: StatefulDeclaration, execution = false): void {
-  check(typeof declaration === 'object' && declaration !== null && declarations.has(declaration), 'Recapture the immutable declaration before use');
-  if (execution) check(negotiated.has(declaration), 'Explicit host/adapter negotiation is required', 'stateful.capability-unavailable');
+  check(isCapturedStatefulDeclaration(declaration), 'Recapture the immutable declaration before use');
+  if (execution) check(isNegotiatedStatefulDeclaration(declaration), 'Explicit host/adapter negotiation is required', 'stateful.capability-unavailable');
 }
 export class StatefulContractError extends Error {
   constructor(readonly code: string, message: string) {super(message); this.name = 'StatefulContractError';}
@@ -94,7 +95,7 @@ export async function captureStatefulDeclaration(input: unknown, requested: Stat
   }
   const body = detached<{definition: StatefulDefinition; limits: StatefulLimits}>({definition: value, limits}, limits);
   const result = detached<StatefulDeclaration>({...body, digest: await digest(canonical(body, limits))}, limits);
-  declarations.add(result); return result;
+  registerStatefulDeclaration(result); return result;
 }
 function capabilities(input: unknown, required: readonly string[], requested: StatefulLimits): void {
   const value = detached<StatefulCapabilities>(input, requested); keys(value, ['family', 'interfaceVersion', 'supported', 'limits']);
@@ -112,7 +113,7 @@ function capabilities(input: unknown, required: readonly string[], requested: St
 /** Pure opt-in negotiation before hooks or storage. Advertising these labels proves no implementation. */
 export async function negotiateStatefulProjection(input: unknown, requested: StatefulLimits, host: unknown, adapter: unknown): Promise<StatefulDeclaration> {
   const limits = profile(requested); capabilities(host, STATEFUL_HOST_CAPABILITIES, limits); capabilities(adapter, STATEFUL_ADAPTER_CAPABILITIES, limits);
-  const declaration = await captureStatefulDeclaration(input, limits); negotiated.add(declaration); return declaration;
+  const declaration = await captureStatefulDeclaration(input, limits); registerNegotiatedStatefulDeclaration(declaration); return declaration;
 }
 function sequence(value: unknown): void {
   validateStructuredInteger(value, 'uint64');
