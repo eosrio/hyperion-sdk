@@ -1,12 +1,13 @@
 import type {StatefulDeclaration} from '../stateful-types.js';
 
 // Same local ownership as v1; private shared capture checks must precede field access.
-const declarations = new WeakSet<object>(), negotiated = new WeakSet<object>();
-export function isCapturedStatefulDeclaration(value: unknown): value is StatefulDeclaration {
-  return typeof value === 'object' && value !== null && declarations.has(value);
+const canonicalModule = new URL('../projection-stateful.js', import.meta.url).href;
+const declarations = new WeakMap<object, string>(), negotiated = new WeakMap<object, string>();
+export function isCapturedStatefulDeclaration(value: unknown, moduleId = canonicalModule): value is StatefulDeclaration {
+  return typeof value === 'object' && value !== null && declarations.get(value) === moduleId;
 }
-export function isNegotiatedStatefulDeclaration(value: unknown): value is StatefulDeclaration {
-  return typeof value === 'object' && value !== null && negotiated.has(value);
+export function isNegotiatedStatefulDeclaration(value: unknown, moduleId = canonicalModule): value is StatefulDeclaration {
+  return typeof value === 'object' && value !== null && negotiated.get(value) === moduleId;
 }
-export function registerStatefulDeclaration(value: StatefulDeclaration): void {declarations.add(value);}
-export function registerNegotiatedStatefulDeclaration(value: StatefulDeclaration): void {negotiated.add(value);}
+export function registerStatefulDeclaration(value: StatefulDeclaration, moduleId = canonicalModule): void {declarations.set(value, moduleId);}
+export function registerNegotiatedStatefulDeclaration(value: StatefulDeclaration, moduleId = canonicalModule): void {negotiated.set(value, moduleId);}
