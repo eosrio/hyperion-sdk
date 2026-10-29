@@ -109,6 +109,8 @@ needed by SDK #32's untemplated asset lifecycle. The explicit opt-in
 coherent reads, fixed-candidate custody and adapter conformance seams. The architecture remains
 proposed; no installed backend support, activation or qualification is implied. Existing families remain unchanged.
 
+The additive [original action metadata variant](docs/original-action-metadata.md) requires explicit source-capability negotiation; existing source captures retain their exact bytes.
+
 ## Remaining foundation work
 
 Track [SDK issue #1](https://github.com/eosrio/hyperion-sdk/issues/1) and
