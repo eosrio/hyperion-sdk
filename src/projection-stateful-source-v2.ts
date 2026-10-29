@@ -6,13 +6,21 @@ import type {StatefulDeclaration, StatefulInput, StatefulLimits, StatefulSource}
 export type {OriginalTableIdentity} from './internal/stateful-input-v2.js';
 
 /** Opt-in original input representation; the existing v1 input and capture stay closed. */
-export type StatefulInputV2 = Extract<StatefulInput, {kind: 'action'}>
+export interface StatefulActionAuthorizationV1 {readonly actor: string; readonly permission: string}
+/** Present only in the explicitly selected original-action metadata source variant. */
+export const STATEFUL_ACTION_AUTHORIZATION_CAPABILITY_V1 = 'original-action-authorization-v1' as const;
+export interface StatefulActionMetadataOptionsV2 {readonly actionMetadataVersion?: 1}
+export type StatefulInputV2 = (Extract<StatefulInput, {kind: 'action'}> & {
+    readonly authorization?: readonly StatefulActionAuthorizationV1[];
+  })
   | (Omit<Extract<StatefulInput, {kind: 'table'}>, 'scope' | 'primaryKey'> & {
     readonly identity: OriginalTableIdentity;
     /** Actual original payer; null means the selected protocol explicitly has no payer field. */
     readonly payer: string | null;
   });
-export interface StatefulSourceV2 extends Omit<StatefulSource, 'inputs'> {readonly inputs: readonly StatefulInputV2[]}
+export interface StatefulSourceV2 extends Omit<StatefulSource, 'inputs'>, StatefulActionMetadataOptionsV2 {
+  readonly inputs: readonly StatefulInputV2[];
+}
 /** The owning version2 family validates/negotiates its entire wrapper, not this structural subset. */
 export interface StatefulSourceDeclarationV2 {
   readonly projection: StatefulDeclaration;
@@ -40,6 +48,24 @@ function hash(value: unknown): asserts value is string {
 }
 function count(value: unknown, minimum = 0): asserts value is number {
   check(Number.isSafeInteger(value) && Number(value) >= minimum, 'Expected source occurrence coordinate');
+}
+/** Capability selection only; neither metadata nor this result grants source or serving authority. */
+export function negotiateStatefulActionMetadataV2(required: unknown, supported: unknown): StatefulActionMetadataOptionsV2 {
+  const list = (value: unknown): string[] => {
+    check(Array.isArray(value) && Object.getPrototypeOf(value) === Array.prototype
+      && Object.getOwnPropertySymbols(value).length === 0 && value.length <= 1, 'Invalid action metadata capabilities');
+    const properties = Object.getOwnPropertyDescriptors(value);
+    check(Object.keys(properties).length === value.length + 1, 'Invalid action metadata capability fields');
+    return Array.from({length: value.length}, (_, index) => {
+      const property = properties[String(index)];
+      check(property?.enumerable && Object.hasOwn(property, 'value')
+        && property.value === STATEFUL_ACTION_AUTHORIZATION_CAPABILITY_V1, 'Unknown action metadata capability');
+      return property.value as string;
+    });
+  };
+  const needs = list(required), available = list(supported);
+  check(needs.every(name => available.includes(name)), 'Original action authorization capability unavailable');
+  return Object.freeze(needs.length ? {actionMetadataVersion: 1 as const} : {});
 }
 function point(value: unknown): asserts value is StatefulSource['previous'] {
   fields(value, ['blockNum', 'blockId']); count(value.blockNum); hash(value.blockId);
@@ -74,7 +100,10 @@ function projection(input: StatefulSourceDeclarationV2): {projection: StatefulDe
 export async function captureStatefulSourceV2(declaration: StatefulSourceDeclarationV2, input: unknown): Promise<CapturedStatefulSourceV2> {
   const context = projection(declaration), selected = context.projection, limits = selected.limits;
   const source = canonical(input, limits).value as unknown as StatefulSourceV2;
-  fields(source, ['previous', 'block', 'inputs']); point(source.previous);
+  const actionMetadata = Object.hasOwn(source, 'actionMetadataVersion');
+  fields(source, ['previous', 'block', 'inputs', ...(actionMetadata ? ['actionMetadataVersion'] : [])]);
+  if (actionMetadata) check(source.actionMetadataVersion === 1, 'Unsupported original action metadata version');
+  point(source.previous);
   fields(source.block, ['blockNum', 'blockId', 'previousBlockId', 'timeMs']);
   count(source.block.blockNum, 1); hash(source.block.blockId); hash(source.block.previousBlockId);
   validateStructuredInteger(source.block.timeMs, 'uint64');
@@ -87,7 +116,8 @@ export async function captureStatefulSourceV2(declaration: StatefulSourceDeclara
     const common = ['selector', 'order', 'kind', 'contract', 'name', 'abiDeployment', 'abiSha256',
       'mappingRevision', 'codecRevision', 'normalizerRevision', 'rawHex', 'rawSha256', 'sourceEvidence', 'transactionId', 'data'];
     fields(occurrence, [...common, ...(occurrence.kind === 'action'
-      ? ['actionOrdinal', 'receiver', 'receiptOrdinal', 'sequence'] : ['identity', 'payer', 'present', 'deltaOrdinal', 'rowOrdinal'])]);
+      ? ['actionOrdinal', 'receiver', 'receiptOrdinal', 'sequence', ...(actionMetadata ? ['authorization'] : [])]
+      : ['identity', 'payer', 'present', 'deltaOrdinal', 'rowOrdinal'])]);
     const selector = selected.definition.selectors.find(value => value.id === occurrence.selector);
     check(selector && selector.kind === occurrence.kind && selector.contract === occurrence.contract
       && selector.name === occurrence.name, 'Undeclared original selector');
@@ -108,6 +138,15 @@ export async function captureStatefulSourceV2(declaration: StatefulSourceDeclara
         && new TextEncoder().encode(occurrence.receiver).length <= limits.keyBytes, 'Original receiver bound');
       if (occurrence.sequence !== null) validateStructuredInteger(occurrence.sequence, 'uint64');
       check(occurrence.data !== null && typeof occurrence.data === 'object' && !Array.isArray(occurrence.data), 'Original action data required');
+      if (actionMetadata) {
+        check(Array.isArray(occurrence.authorization), 'Original action authorization is absent');
+        for (const permission of occurrence.authorization) {
+          fields(permission, ['actor', 'permission']);
+          for (const value of [permission.actor, permission.permission])
+            check(typeof value === 'string' && value.length > 0
+              && new TextEncoder().encode(value).length <= limits.keyBytes, 'Original authorization name bound');
+        }
+      }
       original = ['action', occurrence.transactionId, occurrence.receiver, occurrence.actionOrdinal, occurrence.receiptOrdinal];
     } else {
       check(occurrence.kind === 'table' && typeof occurrence.present === 'boolean', 'Original table presence required');
