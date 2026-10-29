@@ -1,5 +1,8 @@
+import {executionApply, executionCompose, executionReads, executionReduce, type ExecutionPolicy, type ExecutionPort} from './internal/stateful-execution.js';
 import {canonicalStructuredJsonRecord, validateStructuredInteger} from './internal/structured-values.js';
 import type {StructuredRecord} from './internal/structured-values.js';
+import {isCapturedStatefulDeclaration, isNegotiatedStatefulDeclaration,
+  registerStatefulDeclaration, registerNegotiatedStatefulDeclaration} from './internal/stateful-ownership.js';
 import {PROJECTION_ROLLBACK_LIMITS, type ProjectionCheckpoint} from './projection.js';
 import type {CapturedStatefulSource, StatefulAdapter, StatefulApplyResult, StatefulCandidate,
   StatefulCandidateStore, StatefulCapabilities, StatefulDeclaration, StatefulDefinition, StatefulGuard,
@@ -12,10 +15,9 @@ export const STATEFUL_HOST_CAPABILITIES = Object.freeze(['ordered-inputs', 'sour
 export const STATEFUL_ADAPTER_CAPABILITIES = Object.freeze(['structured-records', 'coherent-keyed-reads', 'atomic-group', 'fixed-replay-receipts', 'revision-checkpoint-fence', 'bounded-undo', 'retained-inspection'] as const);
 /** Existing recovery ceilings are reused; there are no new workload or aggregate-budget defaults. */
 export const STATEFUL_RECOVERY_LIMITS = PROJECTION_ROLLBACK_LIMITS;
-const declarations = new WeakSet<object>(), negotiated = new WeakSet<object>();
 function captured(declaration: StatefulDeclaration, execution = false): void {
-  check(typeof declaration === 'object' && declaration !== null && declarations.has(declaration), 'Recapture the immutable declaration before use');
-  if (execution) check(negotiated.has(declaration), 'Explicit host/adapter negotiation is required', 'stateful.capability-unavailable');
+  check(isCapturedStatefulDeclaration(declaration, import.meta.url), 'Recapture the immutable declaration before use');
+  if (execution) check(isNegotiatedStatefulDeclaration(declaration, import.meta.url), 'Explicit host/adapter negotiation is required', 'stateful.capability-unavailable');
 }
 export class StatefulContractError extends Error {
   constructor(readonly code: string, message: string) {super(message); this.name = 'StatefulContractError';}
@@ -94,7 +96,7 @@ export async function captureStatefulDeclaration(input: unknown, requested: Stat
   }
   const body = detached<{definition: StatefulDefinition; limits: StatefulLimits}>({definition: value, limits}, limits);
   const result = detached<StatefulDeclaration>({...body, digest: await digest(canonical(body, limits))}, limits);
-  declarations.add(result); return result;
+  registerStatefulDeclaration(result, import.meta.url); return result;
 }
 function capabilities(input: unknown, required: readonly string[], requested: StatefulLimits): void {
   const value = detached<StatefulCapabilities>(input, requested); keys(value, ['family', 'interfaceVersion', 'supported', 'limits']);
@@ -112,7 +114,7 @@ function capabilities(input: unknown, required: readonly string[], requested: St
 /** Pure opt-in negotiation before hooks or storage. Advertising these labels proves no implementation. */
 export async function negotiateStatefulProjection(input: unknown, requested: StatefulLimits, host: unknown, adapter: unknown): Promise<StatefulDeclaration> {
   const limits = profile(requested); capabilities(host, STATEFUL_HOST_CAPABILITIES, limits); capabilities(adapter, STATEFUL_ADAPTER_CAPABILITIES, limits);
-  const declaration = await captureStatefulDeclaration(input, limits); negotiated.add(declaration); return declaration;
+  const declaration = await captureStatefulDeclaration(input, limits); registerNegotiatedStatefulDeclaration(declaration, import.meta.url); return declaration;
 }
 function sequence(value: unknown): void {
   validateStructuredInteger(value, 'uint64');
@@ -221,47 +223,17 @@ function readValue(declaration: StatefulDeclaration, key: StatefulKey, input: un
   keys(input, ['status', 'reason']); check(input.status === 'unavailable', 'Unknown read coverage'); text(input.reason, declaration.limits);
   return Object.freeze({status: 'unavailable', reason: input.reason});
 }
-async function guarded<T>(guard: StatefulGuard, work: () => Promise<T>): Promise<T> {
-  guard(); try {return await work();} finally {guard();}
-}
 /** Exact-key API composition validates the same revision AND checkpoint around every awaited read. */
 export async function readStatefulRecords(declaration: StatefulDeclaration, adapter: StatefulAdapter, expected: StatefulView,
   requested: readonly StatefulKey[], guard: StatefulGuard): Promise<readonly StatefulRead[]> {
-  captured(declaration, true); capabilities(adapter.capabilities, STATEFUL_ADAPTER_CAPABILITIES, declaration.limits);
-  guard(); const view = captureStatefulView(declaration, expected), limits = declaration.limits;
-  const selected = detached<{keys: readonly StatefulKey[]}>({keys: requested}, limits).keys;
-  check(Array.isArray(selected) && selected.length <= limits.readKeys && selected.length <= limits.responseRecords, 'Key/read response bound');
-  const selectedKeys = selected.map(k => logicalKey(declaration, k));
-  assertStatefulView(declaration, await guarded(guard, () => adapter.open(declaration)), view);
-  const answer = detached<{view: StatefulView; results: StatefulRead[]}>(await guarded(guard, () => adapter.read(view, selectedKeys)), limits, limits.responseBytes);
-  keys(answer, ['results', 'view']);
-  check(Array.isArray(answer.results) && answer.results.length === selectedKeys.length, 'Incomplete keyed response');
-  assertStatefulView(declaration, answer.view, view);
-  const results = answer.results.map((result, i) => readValue(declaration, selectedKeys[i]!, result));
-  assertStatefulView(declaration, await guarded(guard, () => adapter.open(declaration)), view); guard();
-  return Object.freeze(results);
+  return executionReads(executionPolicy(declaration, adapter), executionPort(declaration, adapter), expected, requested, guard);
 }
 /** Finite keyed API composition: one view, total read/record/output bounds, no native query language. */
 export async function composeStatefulRead(declaration: StatefulDeclaration, adapter: StatefulAdapter, expected: StatefulView,
   compose: (port: StatefulQueryRead) => Promise<unknown>, guard: StatefulGuard): Promise<{readonly view: StatefulView; readonly value: StructuredRecord}> {
-  captured(declaration, true); capabilities(adapter.capabilities, STATEFUL_ADAPTER_CAPABILITIES, declaration.limits);
-  guard(); const view = captureStatefulView(declaration, expected), limits = declaration.limits;
-  assertStatefulView(declaration, await guarded(guard, () => adapter.open(declaration)), view);
-  let active = true, attempts = 0, records = 0, bytes = 0;
-  const admit = () => {guard(); check(active, 'Query read port is closed');};
-  const port: StatefulQueryRead = Object.freeze({view, async get(kind: string, key: string) {
-    admit(); check(++attempts <= limits.readAttempts && ++records <= limits.responseRecords, 'Composed read/record bound');
-    const result = (await readStatefulRecords(declaration, adapter, view, [{kind, key}], guard))[0]; admit();
-    check(result && result.status !== 'unavailable', 'Required query coverage unavailable', 'stateful.unavailable');
-    bytes += new TextEncoder().encode(canonical({result}, limits)).length;
-    check(bytes <= limits.responseBytes, 'Composed read byte bound'); return result;
-  }});
-  let result: unknown;
-  try {result = await guarded(guard, () => compose(port));} finally {active = false;}
-  assertStatefulView(declaration, await guarded(guard, () => adapter.open(declaration)), view);
-  const value = detached<StructuredRecord>(result, limits, limits.responseBytes); guard();
-  return Object.freeze({view, value});
+  return executionCompose(executionPolicy(declaration, adapter), executionPort(declaration, adapter), expected, compose, guard);
 }
+
 function mutation(declaration: StatefulDeclaration, input: unknown): StatefulMutation {
   object(input); keys(input, input.kind === 'put' ? ['kind', 'target', 'value'] : ['kind', 'target']);
   const target = logicalKey(declaration, input.target);
@@ -293,39 +265,7 @@ export async function captureStatefulCandidate(declaration: StatefulDeclaration,
 /** A real reduction uses only exact-key reads and whole local puts/deletes; plugin scheduling stays outside. */
 export async function reduceStatefulBlock(declaration: StatefulDeclaration, source: CapturedStatefulSource, adapter: StatefulAdapter,
   hook: (port: StatefulReduction) => Promise<void>, guard: StatefulGuard): Promise<StatefulCandidate> {
-  captured(declaration, true); capabilities(adapter.capabilities, STATEFUL_ADAPTER_CAPABILITIES, declaration.limits);
-  guard(); const selectedSource = detached<CapturedStatefulSource>(source, declaration.limits);
-  const original = await guarded(guard, () => captureStatefulSource(declaration, selectedSource.source));
-  check(same(original, selectedSource, declaration.limits), 'Source capture identity differs');
-  const view = captureStatefulView(declaration, await guarded(guard, () => adapter.open(declaration)));
-  check(same(view.checkpoint, original.source.previous, declaration.limits), 'Reduction predecessor is not current', 'stateful.stale-view');
-  const overlay = new Map<string, Exclude<StatefulRead, {status: 'unavailable'}>>(), base = new Map<string, StatefulObservation>(), mutations: StatefulMutation[] = [];
-  const limits = declaration.limits; let attempts = 0, stagedBytes = 0, active = true;
-  const admit = () => {guard(); check(active, 'Reduction port is closed');};
-  const stage = (input: unknown) => {
-    admit(); check(mutations.length < limits.mutations, 'Mutation bound'); const item = mutation(declaration, input);
-    stagedBytes += new TextEncoder().encode(canonical(item, limits)).length; check(stagedBytes <= limits.candidateBytes, 'Staged candidate byte bound');
-    mutations.push(item); overlay.set(JSON.stringify(item.target), item.kind === 'put' ? Object.freeze({status: 'present', value: item.value}) : Object.freeze({status: 'covered-absent'}));
-  };
-  const port: StatefulReduction = Object.freeze({source: original.source, view,
-    async get(kind: string, value: string) {
-      admit(); check(++attempts <= limits.readAttempts && limits.readKeys >= 1, 'Read attempt bound');
-      const key = logicalKey(declaration, {kind, key: value}), id = JSON.stringify(key), staged = overlay.get(id);
-      if (staged) return staged;
-      const cached = base.get(id); if (cached) return cached.result;
-      const [result] = await readStatefulRecords(declaration, adapter, view, [key], guard); admit();
-      check(result && result.status !== 'unavailable', 'Required source/relationship coverage unavailable', 'stateful.unavailable');
-      base.set(id, Object.freeze({key, result})); return result;
-    },
-    put: (kind: string, key: string, value: unknown) => stage({kind: 'put', target: {kind, key}, value}),
-    delete: (kind: string, key: string) => stage({kind: 'delete', target: {kind, key}})});
-  try {await guarded(guard, () => hook(port));} finally {active = false;}
-  assertStatefulView(declaration, await guarded(guard, () => adapter.open(declaration)), view);
-  const body = {declarationDigest: declaration.digest, source: original, view, observations: [...base.values()], mutations};
-  // Reserve the complete digest member before hashing, not just the smaller unhashed body.
-  detached({...body, digest: '0'.repeat(64)}, limits);
-  const candidate = detached<StatefulCandidate>({...body, digest: await guarded(guard, () => digest(canonical(body, limits)))}, limits);
-  return guarded(guard, () => captureStatefulCandidate(declaration, candidate));
+  return executionReduce(executionPolicy(declaration, adapter), source, executionPort(declaration, adapter), hook, guard);
 }
 /**
  * Receipt inspection and host input custody precede hooks/storage. Exact redelivery and uncertain
@@ -333,42 +273,39 @@ export async function reduceStatefulBlock(declaration: StatefulDeclaration, sour
  */
 export async function executeStatefulBlock(declaration: StatefulDeclaration, input: unknown, adapter: StatefulAdapter,
   custody: StatefulCandidateStore, hook: (port: StatefulReduction) => Promise<void>, guard: StatefulGuard): Promise<StatefulApplyResult> {
-  captured(declaration, true); capabilities(adapter.capabilities, STATEFUL_ADAPTER_CAPABILITIES, declaration.limits);
-  const source = await guarded(guard, () => captureStatefulSource(declaration, input)), limits = declaration.limits;
-  const raw = await guarded(guard, () => adapter.inspect(declaration, source));
-  const inspection = detached<StatefulInspection>(raw, limits);
-  keys(inspection, ['phase', 'status', 'sourceDigest', 'candidateDigest', 'progress']);
-  const progress = captureStatefulView(declaration, inspection.progress);
-  check(['ready', 'pending', 'gap', 'rollback'].includes(inspection.phase) && ['new', 'pending', 'committed', 'uncovered'].includes(inspection.status), 'Unknown inspection state');
-  if (inspection.sourceDigest !== null) hash(inspection.sourceDigest);
-  if (inspection.candidateDigest !== null) hash(inspection.candidateDigest);
-  check(inspection.phase === 'ready' || inspection.phase === 'pending' && inspection.status === 'pending', 'Projection is incomplete', 'stateful.incomplete');
-  check(inspection.status !== 'uncovered', 'Source receipt coverage expired', 'stateful.receipt-unavailable');
-  if (inspection.status === 'new') check(inspection.sourceDigest === null && inspection.candidateDigest === null, 'New inspection carries a retained identity');
-  if (inspection.status === 'pending') check(inspection.sourceDigest !== null && inspection.candidateDigest !== null, 'Pending inspection has no retained identity');
-  if (inspection.status === 'committed') {
-    check(inspection.sourceDigest === source.digest && inspection.candidateDigest !== null, 'Conflicting committed source', 'stateful.replay-conflict');
-    check(progress.checkpoint.blockNum >= source.source.block.blockNum && (progress.checkpoint.blockNum !== source.source.block.blockNum
-      || progress.checkpoint.blockId === source.source.block.blockId), 'Committed progress does not contain the source');
-    return Object.freeze({status: 'duplicate', progress});
-  }
-  const saved = await guarded(guard, () => custody.load(declaration.digest, source.digest));
-  let candidate: StatefulCandidate;
-  if (saved !== null) candidate = await guarded(guard, () => captureStatefulCandidate(declaration, saved));
-  else {
-    check(inspection.status === 'new' && inspection.phase === 'ready' && inspection.sourceDigest === null && inspection.candidateDigest === null, 'Original pending candidate is unavailable', 'stateful.incomplete');
-    candidate = await reduceStatefulBlock(declaration, source, adapter, hook, guard);
-    await guarded(guard, () => custody.retain(candidate));
-  }
-  check(same(candidate.source, source, limits), 'Custody belongs to another source', 'stateful.replay-conflict');
-  if (inspection.status === 'pending') check(inspection.sourceDigest === source.digest && inspection.candidateDigest === candidate.digest, 'Pending candidate differs', 'stateful.replay-conflict');
-  assertStatefulView(declaration, progress, candidate.view);
-  const result = detached<StatefulApplyResult>(await guarded(guard, () => adapter.apply(candidate)), limits);
-  keys(result, ['status', 'progress']); check(result.status === 'applied' || result.status === 'duplicate', 'Unknown apply outcome');
-  captureStatefulView(declaration, result.progress);
-  check(result.progress.checkpoint.blockNum >= source.source.block.blockNum && (result.progress.checkpoint.blockNum !== source.source.block.blockNum
-    || result.progress.checkpoint.blockId === source.source.block.blockId), 'Apply progress does not contain the source');
-  if (result.status === 'applied') check(result.progress.checkpoint.blockNum === source.source.block.blockNum
-    && result.progress.revision === candidate.view.revision, 'Applied progress changed its revision or advanced beyond its source');
-  return result;
+  return executionApply(executionPolicy(declaration, adapter), input, executionPort(declaration, adapter), custody, hook, guard);
+}
+
+/** Private policies preserve actual version-specific validation; no adapter or phase is fabricated. */
+function executionPolicy(declaration: StatefulDeclaration, adapter: StatefulAdapter): ExecutionPolicy<CapturedStatefulSource, StatefulCandidate> {
+  return {
+    get digest() {return declaration.digest;}, get limits() {return declaration.limits;},
+    admit() {captured(declaration, true); capabilities(adapter.capabilities, STATEFUL_ADAPTER_CAPABILITIES, declaration.limits);},
+    error: (code, message) => new StatefulContractError(code, message),
+    detach: <T>(input: unknown, maximumBytes?: number) => detached<T>(input, declaration.limits, maximumBytes),
+    canonical: input => canonical(input, declaration.limits), hash: digest,
+    source: input => captureStatefulSource(declaration, input), candidate: input => captureStatefulCandidate(declaration, input),
+    view: input => captureStatefulView(declaration, input),
+    assertView: (current, expected) => assertStatefulView(declaration, current, expected),
+    key: input => logicalKey(declaration, input), mutation: input => mutation(declaration, input),
+    readValue: (key, input) => readValue(declaration, key, input),
+    inspection(raw) {
+      const limits = declaration.limits, inspection = detached<StatefulInspection>(raw, limits);
+      keys(inspection, ['phase', 'status', 'sourceDigest', 'candidateDigest', 'progress']);
+      const progress = captureStatefulView(declaration, inspection.progress);
+      check(['ready', 'pending', 'gap', 'rollback'].includes(inspection.phase) && ['new', 'pending', 'committed', 'uncovered'].includes(inspection.status), 'Unknown inspection state');
+      if (inspection.sourceDigest !== null) hash(inspection.sourceDigest);
+      if (inspection.candidateDigest !== null) hash(inspection.candidateDigest);
+      check(inspection.phase === 'ready' || inspection.phase === 'pending' && inspection.status === 'pending', 'Projection is incomplete', 'stateful.incomplete');
+      check(inspection.status !== 'uncovered', 'Source receipt coverage expired', 'stateful.receipt-unavailable');
+      if (inspection.status === 'new') check(inspection.sourceDigest === null && inspection.candidateDigest === null, 'New inspection carries a retained identity');
+      if (inspection.status === 'pending') check(inspection.sourceDigest !== null && inspection.candidateDigest !== null, 'Pending inspection has no retained identity');
+      return {status: inspection.status, sourceDigest: inspection.sourceDigest, candidateDigest: inspection.candidateDigest,
+        progress, mayReduce: inspection.phase === 'ready'};
+    }
+  };
+}
+function executionPort(declaration: StatefulDeclaration, adapter: StatefulAdapter): ExecutionPort<CapturedStatefulSource, StatefulCandidate> {
+  return {currentView: () => adapter.open(declaration), read: (view, keys) => adapter.read(view, keys),
+    inspect: source => adapter.inspect(declaration, source), apply: candidate => adapter.apply(candidate)};
 }

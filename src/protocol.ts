@@ -1,6 +1,7 @@
 import {valid} from 'semver';
 import {checkCompatibility, type CompatibilityEnvironment, type ComponentManifest, type Diagnostic} from './manifest.js';
 import type {ProtocolNativeActionRequirement, ProtocolNativeActions} from './protocol-native-actions.js';
+import type {OriginalTableIdentity} from './internal/stateful-input-v2.js';
 export * from './protocol-native-actions.js';
 
 /** Exact, inert artifact pin. An installed component is evidence of availability, not qualification. */
@@ -112,6 +113,23 @@ export type ProtocolNormalizedDelta =
   | {kind: 'record'; identity: string; record: unknown; source: ProtocolSource;
     tableName: string; value?: unknown; metadata: Record<string, unknown>};
 
+/** Opt-in version2 original table input; no synthetic scope or decoded secondary row value. */
+export type ProtocolStatefulTableDeltaV2 =
+  | {readonly kind: 'ignore'; readonly reason: string}
+  | {readonly kind: 'abi-required'; readonly account: string}
+  | {readonly kind: 'table'; readonly contract: string; readonly tableName: string;
+    readonly identity: OriginalTableIdentity; readonly payer: string | null; readonly present: boolean;
+    readonly source: ProtocolSource; readonly value: unknown | null};
+export interface ProtocolStatefulTablesV2<Abi = unknown> {
+  readonly interfaceVersion: 2;
+  /**
+   * Preserve actual physical identity/payer and applicable ABI provenance without changing input.
+   * Secondary index rows return value:null because their original record has keys, not a contract
+   * row value. Missing/malformed/unsupported source must throw; known irrelevant streams need a reason.
+   */
+  normalizeDelta(input: ProtocolDeltaInput, context: ProtocolNormalizationContext<Abi>): ProtocolStatefulTableDeltaV2;
+}
+
 /** Host-supplied source identity; observations do not establish canonical membership. */
 export interface ProtocolBlockAbiSource {
   readonly chainId: string;
@@ -214,6 +232,8 @@ export interface ProtocolProvider<Abi = unknown> {
   readonly profileId: string;
   readonly contractCodec: ProtocolContractCodec<Abi>;
   readonly nativeActions?: ProtocolNativeActions;
+  /** Offered only. An activated stateful source-v2 host must require and negotiate this exact port. */
+  readonly statefulTables?: ProtocolStatefulTablesV2<Abi>;
   createShipSession(handshake: unknown): ProtocolShipSession;
   /** Unknown required streams/features must throw; ignoring a known stream requires a reason. */
   normalizeDelta(input: ProtocolDeltaInput, context: ProtocolNormalizationContext<Abi>): ProtocolNormalizedDelta;

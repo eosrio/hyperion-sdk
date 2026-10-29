@@ -88,9 +88,11 @@ test('existing v1 capture output stays exact and refuses absent/empty scope',asy
   }
 });
 
-test('proposed helpers have no public SDK subpath or capability activation',async()=>{
+test('private primitives stay private and only separately negotiated v2 subpaths are added',async()=>{
   const pkg=JSON.parse(readFileSync(new URL('../package.json',import.meta.url)));
-  assert.equal(Object.keys(pkg.exports).some(value=>value.includes('stateful-input')||value.includes('v2')),false);
+  assert.equal(Object.keys(pkg.exports).some(value=>value.includes('stateful-input')),false);
+  assert.deepEqual(Object.keys(pkg.exports).filter(value=>value.includes('v2')).sort(),
+    ['./projection-stateful-owner-v2','./projection-stateful-source-v2']);
   await assert.rejects(import('@eosrio/hyperion-sdk/internal/stateful-input-v2'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});
   const publicModule=await import('@eosrio/hyperion-sdk/projection-stateful');
   assert.equal(publicModule.captureRawStatefulTarget,undefined);
