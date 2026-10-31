@@ -98,3 +98,40 @@ export interface StatefulQueryHostV2 {
   compose(projectionId: string, compose: (reader: StatefulQueryRead) => Promise<StructuredRecord>):
     Promise<{readonly view: StatefulView; readonly value: StructuredRecord}>;
 }
+
+/** Optional additive interface; the closed owner-v2 declaration/capabilities and get-only port are unchanged. */
+export interface StatefulCompleteKindLimitsV1 {
+  readonly readAttempts: number; readonly responseRecords: number; readonly responseBytes: number;
+}
+export interface StatefulCompleteKindCapabilitiesV1 {
+  readonly family: 'stateful-owner-complete-kind'; readonly interfaceVersion: 1;
+  readonly limits: StatefulCompleteKindLimitsV1;
+}
+declare const completeKindBrand: unique symbol;
+/** Locally negotiated selection. Serialized/copied records cannot authorize this operation. */
+export interface StatefulCompleteKindSelectionV1 extends StatefulCompleteKindCapabilitiesV1 {
+  readonly declarationDigest: string; readonly [completeKindBrand]: true;
+}
+export type StatefulCompleteKindRowV1 = {readonly key: string; readonly value: StructuredRecord};
+export interface StatefulCompleteKindResultV1 {
+  readonly view: StatefulView; readonly kind: string; readonly complete: true;
+  readonly rows: readonly StatefulCompleteKindRowV1[];
+  /** All native data-read/page/exhaustion-probe attempts, including retries; at least one. */
+  readonly attempts: number;
+}
+export interface StatefulCompleteKindAdapterV1 extends StatefulOwnerAdapterV2 {
+  readonly completeKindCapabilities: StatefulCompleteKindCapabilitiesV1;
+  /** Same adapter-issued completed capability and retained guard; true native exhaustion is mandatory. */
+  readCompletedKind(read: StatefulCompletedReadV2, expected: StatefulView, kind: string,
+    remaining: StatefulCompleteKindLimitsV1): Promise<StatefulCompleteKindResultV1>;
+}
+export interface StatefulCompleteKindReadV1 extends StatefulQueryRead {
+  /** Every row of one declared kind, or refusal. No order guarantee, filter or public pagination. */
+  all(kind: string): Promise<readonly StatefulCompleteKindRowV1[]>;
+}
+/** Host must require the optional capability before plugin execution and fence final HTTP publication. */
+export interface StatefulCompleteKindQueryHostV1 {
+  readonly completeKindCapabilities: StatefulCompleteKindCapabilitiesV1;
+  compose(projectionId: string, compose: (reader: StatefulCompleteKindReadV1) => Promise<StructuredRecord>):
+    Promise<{readonly view: StatefulView; readonly value: StructuredRecord}>;
+}

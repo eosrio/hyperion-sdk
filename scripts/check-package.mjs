@@ -68,17 +68,33 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
     await readFile(join(root, 'tests/consumers/stateful-projection.mts'), 'utf8'));
   await writeFile(join(consumer, 'stateful-owner-v2.mts'),
     await readFile(join(root, 'tests/consumers/stateful-owner-v2.mts'), 'utf8'));
+  await writeFile(join(consumer, 'stateful-complete-kind.mts'),
+    await readFile(join(root, 'tests/consumers/stateful-complete-kind.mts'), 'utf8'));
   await writeFile(join(consumer, 'stateful-runtime.mjs'),
     await readFile(join(root, 'tests/consumers/stateful-projection.mjs'), 'utf8'));
   const reference = await readFile(join(root, 'tests/fixtures/stateful-reference.mjs'), 'utf8');
   const sourceImport = '../../dist/projection-stateful.js';
   assert.equal(reference.split(sourceImport).length, 2, 'One reference adapter import must bind the packed SDK');
   await writeFile(join(consumer, 'stateful-reference.mjs'), reference.replace(sourceImport, '@eosrio/hyperion-sdk/projection-stateful'));
+  await mkdir(join(consumer, 'tests/fixtures'), {recursive: true});
+  for (const relative of ['stateful-complete-kind.test.mjs', 'fixtures/stateful-complete-kind-reference.mjs', 'fixtures/stateful-reference.mjs',
+    'fixtures/stateful-legacy-captures.mjs', 'fixtures/complete-kind-legacy.json']) {
+    let content = await readFile(join(root, 'tests', relative), 'utf8');
+    content = content.replace('../dist/projection-stateful-owner-v2.js?independent-complete-kind',
+      '../node_modules/@eosrio/hyperion-sdk/dist/projection-stateful-owner-v2.js?independent-complete-kind');
+    content = content.replaceAll('../../dist/projection-stateful-owner-v2.js', '@eosrio/hyperion-sdk/projection-stateful-owner-v2')
+      .replaceAll('../dist/projection-stateful-owner-v2.js', '@eosrio/hyperion-sdk/projection-stateful-owner-v2')
+      .replaceAll('../../dist/projection-stateful.js', '@eosrio/hyperion-sdk/projection-stateful')
+      .replaceAll('../dist/projection-stateful.js', '@eosrio/hyperion-sdk/projection-stateful');
+    content = content.replaceAll('../../dist/projection-stateful-source-v2.js', '@eosrio/hyperion-sdk/projection-stateful-source-v2');
+    await writeFile(join(consumer, 'tests', relative), content);
+  }
   // No @types/node dependency is needed by the consumer; declarations must be independently usable.
   execFileSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '--strict',
     '--target', 'ES2022', '--module', 'NodeNext', '--resolveJsonModule', 'consumer.mts',
     'protocol-abi-observations.mts', 'protocol-native-actions.mts', 'projection.mts', 'projection-rollback.mts',
-    'projection-recovery.mts', 'projection-contextual.mts', 'projection-contextual-recovery.mts', 'stateful-projection.mts', 'stateful-owner-v2.mts'], { cwd: consumer, stdio: 'inherit' });
+    'projection-recovery.mts', 'projection-contextual.mts', 'projection-contextual-recovery.mts', 'stateful-projection.mts', 'stateful-owner-v2.mts',
+    'stateful-complete-kind.mts'], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'consumer.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'protocol-abi-observations.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'protocol-native-actions.mjs')], { cwd: consumer, stdio: 'inherit' });
@@ -90,6 +106,8 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
   execFileSync(process.execPath, [join(consumer, 'stateful-projection.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'stateful-runtime.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'stateful-owner-v2.mjs')], { cwd: consumer, stdio: 'inherit' });
+  execFileSync(process.execPath, [join(consumer, 'stateful-complete-kind.mjs')], { cwd: consumer, stdio: 'inherit' });
+  execFileSync(process.execPath, ['--test', join(consumer, 'tests/stateful-complete-kind.test.mjs')], { cwd: consumer, stdio: 'inherit' });
   console.log('Packed ESM, JSON Schema and TypeScript consumer passed.');
 } finally {
   await rm(temporary, { recursive: true, force: true });

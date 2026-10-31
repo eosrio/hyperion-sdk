@@ -10,7 +10,9 @@ import type {StatefulDeclaration, StatefulGuard, StatefulKey, StatefulLimits, St
   StatefulRead, StatefulRollback, StatefulView} from './stateful-types.js';
 import type {CapturedRawStatefulTargetV2, StatefulCandidateStoreV2, StatefulCandidateV2,
   StatefulOwnerAdapterV2, StatefulOwnerCapabilitiesV2, StatefulOwnerDeclarationV2, StatefulOwnerIdentityV2,
-  StatefulOwnedInspectionV2, StatefulOwnerLeaseV2, StatefulOwnerRecoveryV2, StatefulReductionReadV2, StatefulReductionV2} from './stateful-owner-v2-types.js';
+  StatefulOwnedInspectionV2, StatefulOwnerLeaseV2, StatefulOwnerRecoveryV2, StatefulReductionReadV2, StatefulReductionV2,
+  StatefulCompleteKindAdapterV1, StatefulCompleteKindCapabilitiesV1, StatefulCompleteKindLimitsV1,
+  StatefulCompleteKindReadV1, StatefulCompleteKindResultV1, StatefulCompleteKindSelectionV1} from './stateful-owner-v2-types.js';
 export type * from './stateful-owner-v2-types.js';
 
 export const STATEFUL_OWNER_FAMILY_V2 = 'stateful-projection-owner-recovery' as const;
@@ -320,4 +322,133 @@ export async function composeStatefulOwnerReadV2(d: StatefulOwnerDeclarationV2, 
       currentView: () => adapter.completedView(selected), read: (expected, keys) => adapter.readCompleted(selected, expected, keys)
     }, view, compose, guard);
   } finally {if (read !== undefined) adapter.closeRead(read);}
+}
+
+export const STATEFUL_COMPLETE_KIND_FAMILY_V1 = 'stateful-owner-complete-kind' as const;
+const completeKindSelections = new WeakMap<object, StatefulOwnerDeclarationV2>();
+function completeKindLimits(d: StatefulOwnerDeclarationV2, input: unknown): StatefulCompleteKindLimitsV1 {
+  const value = detach<StatefulCompleteKindLimitsV1>(input, d.projection.limits);
+  fields(value, ['readAttempts', 'responseRecords', 'responseBytes']);
+  check(Number.isSafeInteger(value.readAttempts) && value.readAttempts > 0
+    && Number.isSafeInteger(value.responseRecords) && value.responseRecords >= 0
+    && Number.isSafeInteger(value.responseBytes) && value.responseBytes >= 2, 'Explicit complete-kind totals required');
+  return value;
+}
+function completeKindOffer(d: StatefulOwnerDeclarationV2, input: unknown): StatefulCompleteKindCapabilitiesV1 {
+  const value = detach<StatefulCompleteKindCapabilitiesV1>(input, d.projection.limits);
+  fields(value, ['family', 'interfaceVersion', 'limits']);
+  check(value.family === STATEFUL_COMPLETE_KIND_FAMILY_V1 && value.interfaceVersion === 1,
+    'Complete-kind capability unavailable', 'stateful.capability-unavailable');
+  completeKindLimits(d, value.limits); return value;
+}
+function completeKindBounds(selected: StatefulCompleteKindLimitsV1, offered: StatefulCompleteKindLimitsV1): void {
+  for (const name of ['readAttempts', 'responseRecords', 'responseBytes'] as const)
+    check(selected[name] <= offered[name], 'Complete-kind total unavailable', 'stateful.capability-unavailable');
+}
+
+/** A separate opt-in selection; no fields or digests of either existing closed family are widened. */
+export function negotiateStatefulCompleteKindV1(d: StatefulOwnerDeclarationV2, requested: StatefulCompleteKindLimitsV1,
+  host: unknown, adapter: unknown): StatefulCompleteKindSelectionV1 {
+  owned(d, true);
+  const limits = completeKindLimits(d, requested), hostOffer = completeKindOffer(d, host), adapterOffer = completeKindOffer(d, adapter);
+  completeKindBounds(limits, d.projection.limits); completeKindBounds(limits, hostOffer.limits); completeKindBounds(limits, adapterOffer.limits);
+  const selection = Object.freeze({family: STATEFUL_COMPLETE_KIND_FAMILY_V1, interfaceVersion: 1 as const,
+    declarationDigest: d.digest, limits}) as StatefulCompleteKindSelectionV1;
+  completeKindSelections.set(selection, d); return selection;
+}
+
+/**
+ * Complete one declared kind through the existing API-local completed read, or refuse.
+ * Native exhaustion/attempt truthfulness remain adapter obligations; final publication remains host-owned.
+ */
+export async function composeStatefulOwnerCompleteKindReadV1(selection: StatefulCompleteKindSelectionV1,
+  adapter: StatefulCompleteKindAdapterV1, expectedOwner: StatefulOwnerIdentityV2, expectedView: StatefulView,
+  compose: (reader: StatefulCompleteKindReadV1) => Promise<unknown>, guard: StatefulGuard):
+  Promise<{readonly view: StatefulView; readonly value: StructuredRecord}> {
+  check(typeof selection === 'object' && selection !== null && completeKindSelections.has(selection),
+    'Explicit local complete-kind negotiation is required', 'stateful.capability-unavailable');
+  const d = completeKindSelections.get(selection)!; owned(d, true);
+  const limits = selection.limits, owner = detach<StatefulOwnerIdentityV2>(expectedOwner, d.projection.limits),
+    view = captureStatefulOwnerViewV2(d, expectedView);
+  fields(owner, ['id', 'generation']); text(owner.id, d.projection.limits); text(owner.generation, d.projection.limits);
+  guard();
+  check(typeof adapter.readCompletedKind === 'function', 'Complete-kind operation unavailable', 'stateful.capability-unavailable');
+  completeKindBounds(limits, completeKindOffer(d, adapter.completeKindCapabilities).limits);
+  await guarded(guard, () => validateCapabilities(d.projection, adapter.capabilities, STATEFUL_OWNER_ADAPTER_CAPABILITIES_V2));
+  let read: Awaited<ReturnType<StatefulOwnerAdapterV2['completedRead']>> | undefined;
+  let active = true, busy = false, failed = false, failure: unknown, attempts = 0, records = 0, bytes = 0;
+  const admit = () => {
+    guard(); check(active, 'Complete-kind query port is closed');
+    if (failed) throw failure;
+  };
+  const fail = (error: unknown) => {if (!failed) {failed = true; failure = error;} return failure;};
+  const remaining = (): StatefulCompleteKindLimitsV1 => Object.freeze({readAttempts: limits.readAttempts - attempts,
+    responseRecords: limits.responseRecords - records, responseBytes: limits.responseBytes - bytes});
+  const begin = () => {
+    admit(); check(!busy, 'Concurrent complete-kind reads are unavailable', 'stateful.unavailable');
+    const available = remaining();
+    check(available.readAttempts > 0 && available.responseBytes >= 2, 'Complete-kind read total exceeded', 'stateful.unavailable');
+    attempts++; busy = true; return available;
+  };
+  const snapshot = (input: unknown) => {
+    const value = canonical(input, d.projection.limits, remaining().responseBytes);
+    bytes += value.bytes; return value.value;
+  };
+  const assertCurrent = async () => {
+    admit(); assertStatefulOwnerViewV2(d, await guarded(admit, () => adapter.completedView(read!)), view); admit();
+  };
+  const operation = async <T>(work: (available: StatefulCompleteKindLimitsV1) => Promise<T>): Promise<T> => {
+    let started = false;
+    try {const available = begin(); started = true; return await work(available);}
+    catch (error) {throw fail(error);}
+    finally {if (started) busy = false;}
+  };
+  try {
+    guard(); read = await adapter.completedRead(owner, view, guard); guard(); await assertCurrent();
+    const reader: StatefulCompleteKindReadV1 = Object.freeze({view,
+      get: (kind: string, key: string) => operation(async () => {
+        check(d.projection.limits.readKeys >= 1, 'Key/read response bound');
+        check(records < limits.responseRecords, 'Complete-kind record total exceeded', 'stateful.unavailable'); records++;
+        const target = logicalKey(d, {kind, key}); await assertCurrent();
+        const raw = await guarded(admit, () => adapter.readCompleted(read!, view, [target])); admit();
+        const answer = snapshot(raw) as unknown as {readonly view: StatefulView; readonly results: readonly StatefulRead[]};
+        fields(answer, ['view', 'results']);
+        check(Array.isArray(answer.results) && answer.results.length === 1, 'Incomplete keyed response');
+        assertStatefulOwnerViewV2(d, answer.view, view);
+        const result = readValue(d, target, answer.results[0]);
+        check(result.status !== 'unavailable', 'Required query coverage unavailable', 'stateful.unavailable');
+        await assertCurrent(); return result;
+      }),
+      all: (kind: string) => operation(async available => {
+        check(d.projection.definition.records.some(record => record.kind === kind), 'Undeclared logical kind');
+        await assertCurrent();
+        const raw = await guarded(admit, () => adapter.readCompletedKind(read!, view, kind, available)); admit();
+        const answer = snapshot(raw) as unknown as StatefulCompleteKindResultV1;
+        fields(answer, ['view', 'kind', 'complete', 'rows', 'attempts']);
+        check(answer.kind === kind && answer.complete === true, 'Complete declared-kind coverage unavailable', 'stateful.unavailable');
+        check(Number.isSafeInteger(answer.attempts) && answer.attempts >= 1 && answer.attempts <= available.readAttempts,
+          'Complete-kind native attempt total exceeded', 'stateful.unavailable');
+        attempts += answer.attempts - 1; assertStatefulOwnerViewV2(d, answer.view, view);
+        check(Array.isArray(answer.rows) && answer.rows.length <= available.responseRecords,
+          'Complete-kind record total exceeded', 'stateful.unavailable');
+        const keys = new Set<string>();
+        const rows = answer.rows.map(row => {
+          fields(row, ['key', 'value']); const key = logicalKey(d, {kind, key: row.key});
+          check(!keys.has(key.key), 'Duplicate complete-kind key'); keys.add(key.key);
+          return Object.freeze({key: key.key, value: canonicalStatefulRecord(d.projection, kind, row.value).value});
+        });
+        records += rows.length; await assertCurrent(); return Object.freeze(rows);
+      })});
+    let result: unknown;
+    try {
+      result = await guarded(admit, () => compose(reader));
+      check(!busy, 'Unawaited complete-kind read prevents completion', 'stateful.unavailable');
+      // Retire the plugin port before the final native await; escaped callbacks cannot start more work here.
+      active = false;
+      assertStatefulOwnerViewV2(d, await guarded(guard, () => adapter.completedView(read!)), view);
+      if (failed) throw failure;
+      const value = snapshot(result); guard(); if (failed) throw failure;
+      return Object.freeze({view, value});
+    } finally {active = false;}
+  } finally {active = false; if (read !== undefined) adapter.closeRead(read);}
 }
