@@ -36,8 +36,12 @@ of exactly one declared kind, including a successful empty array. It exposes no
 filter, database handle, cursor, limit, ordering guarantee or new authority.
 It must not be used to cast the scalar projection-query family into owner-v2.
 
-The adapter extension adds `completeKindCapabilities` and
-`readCompletedKind(read, expectedView, kind, remaining)`. Its exact response is
+The adapter extension adds `completeKindCapabilities`, a counted
+`readCompletedKey(read, expectedView, key, remaining)` operation and
+`readCompletedKind(read, expectedView, kind, remaining)`. The counted key response
+is exactly `{view, result, attempts}`. The new callback never uses the legacy
+`readCompleted` method, whose interface has no native-attempt accounting. The
+complete-kind response is exactly
 `{view, kind, complete: true, rows, attempts}`. `attempts` is a positive safe
 integer accounting for every native read/page/probe attempt of this call,
 including retries and the work establishing exhaustion. The adapter must remain
@@ -47,6 +51,16 @@ awaits. It returns `complete: true` only after genuine native exhaustion. A
 native limit, short page, byte cut, cancellation or unknown cursor outcome is
 never exhaustion. A one-extra-row probe may establish overflow; it cannot make
 the partial rows a successful complete result.
+
+Both counted operations must stop before starting any data read/page/probe that
+would exceed the supplied remaining total, and report every such attempt,
+including failed attempts that they recover through a retry. SDK validation of
+the positive reported count is additional to that native enforcement. Existing
+`completedRead`/`completedView`, retained owner/lease/canonicality guards and
+readiness inspection are authority checks, not projection data reads; they do
+not consume this data-read attempt total. They retain the existing deadline and
+cancellation boundary. Implementations cannot hide projection data reads or
+their retries inside authority inspections to evade the selected total.
 
 The SDK reserves at least one attempt before each operation, shares selected
 totals across all `get`/`all` calls, and charges additional reported native
