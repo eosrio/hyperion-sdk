@@ -119,8 +119,16 @@ export interface StatefulCompleteKindResultV1 {
   /** All native data-read/page/exhaustion-probe attempts, including retries; at least one. */
   readonly attempts: number;
 }
+export interface StatefulCompleteKindKeyResultV1 {
+  readonly view: StatefulView; readonly result: StatefulRead;
+  /** Every native data-read attempt, including retries; authority/view inspections are separate guards. */
+  readonly attempts: number;
+}
 export interface StatefulCompleteKindAdapterV1 extends StatefulOwnerAdapterV2 {
   readonly completeKindCapabilities: StatefulCompleteKindCapabilitiesV1;
+  /** Counted keyed read for this extension; the legacy readCompleted operation has no attempt accounting. */
+  readCompletedKey(read: StatefulCompletedReadV2, expected: StatefulView, key: StatefulKey,
+    remaining: StatefulCompleteKindLimitsV1): Promise<StatefulCompleteKindKeyResultV1>;
   /** Same adapter-issued completed capability and retained guard; true native exhaustion is mandatory. */
   readCompletedKind(read: StatefulCompletedReadV2, expected: StatefulView, kind: string,
     remaining: StatefulCompleteKindLimitsV1): Promise<StatefulCompleteKindResultV1>;

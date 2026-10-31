@@ -12,7 +12,8 @@ import type {CapturedRawStatefulTargetV2, StatefulCandidateStoreV2, StatefulCand
   StatefulOwnerAdapterV2, StatefulOwnerCapabilitiesV2, StatefulOwnerDeclarationV2, StatefulOwnerIdentityV2,
   StatefulOwnedInspectionV2, StatefulOwnerLeaseV2, StatefulOwnerRecoveryV2, StatefulReductionReadV2, StatefulReductionV2,
   StatefulCompleteKindAdapterV1, StatefulCompleteKindCapabilitiesV1, StatefulCompleteKindLimitsV1,
-  StatefulCompleteKindReadV1, StatefulCompleteKindResultV1, StatefulCompleteKindSelectionV1} from './stateful-owner-v2-types.js';
+  StatefulCompleteKindReadV1, StatefulCompleteKindResultV1, StatefulCompleteKindKeyResultV1,
+  StatefulCompleteKindSelectionV1} from './stateful-owner-v2-types.js';
 export type * from './stateful-owner-v2-types.js';
 
 export const STATEFUL_OWNER_FAMILY_V2 = 'stateful-projection-owner-recovery' as const;
@@ -372,7 +373,8 @@ export async function composeStatefulOwnerCompleteKindReadV1(selection: Stateful
     view = captureStatefulOwnerViewV2(d, expectedView);
   fields(owner, ['id', 'generation']); text(owner.id, d.projection.limits); text(owner.generation, d.projection.limits);
   guard();
-  check(typeof adapter.readCompletedKind === 'function', 'Complete-kind operation unavailable', 'stateful.capability-unavailable');
+  check(typeof adapter.readCompletedKind === 'function' && typeof adapter.readCompletedKey === 'function',
+    'Counted complete-kind/key operations unavailable', 'stateful.capability-unavailable');
   completeKindBounds(limits, completeKindOffer(d, adapter.completeKindCapabilities).limits);
   await guarded(guard, () => validateCapabilities(d.projection, adapter.capabilities, STATEFUL_OWNER_ADAPTER_CAPABILITIES_V2));
   let read: Awaited<ReturnType<StatefulOwnerAdapterV2['completedRead']>> | undefined;
@@ -394,6 +396,11 @@ export async function composeStatefulOwnerCompleteKindReadV1(selection: Stateful
     const value = canonical(input, d.projection.limits, remaining().responseBytes);
     bytes += value.bytes; return value.value;
   };
+  const consumeAttempts = (reported: number, available: StatefulCompleteKindLimitsV1) => {
+    check(Number.isSafeInteger(reported) && reported >= 1 && reported <= available.readAttempts,
+      'Complete-kind native attempt total exceeded', 'stateful.unavailable');
+    attempts += reported - 1;
+  };
   const assertCurrent = async () => {
     admit(); assertStatefulOwnerViewV2(d, await guarded(admit, () => adapter.completedView(read!)), view); admit();
   };
@@ -406,16 +413,15 @@ export async function composeStatefulOwnerCompleteKindReadV1(selection: Stateful
   try {
     guard(); read = await adapter.completedRead(owner, view, guard); guard(); await assertCurrent();
     const reader: StatefulCompleteKindReadV1 = Object.freeze({view,
-      get: (kind: string, key: string) => operation(async () => {
+      get: (kind: string, key: string) => operation(async available => {
         check(d.projection.limits.readKeys >= 1, 'Key/read response bound');
         check(records < limits.responseRecords, 'Complete-kind record total exceeded', 'stateful.unavailable'); records++;
         const target = logicalKey(d, {kind, key}); await assertCurrent();
-        const raw = await guarded(admit, () => adapter.readCompleted(read!, view, [target])); admit();
-        const answer = snapshot(raw) as unknown as {readonly view: StatefulView; readonly results: readonly StatefulRead[]};
-        fields(answer, ['view', 'results']);
-        check(Array.isArray(answer.results) && answer.results.length === 1, 'Incomplete keyed response');
+        const raw = await guarded(admit, () => adapter.readCompletedKey(read!, view, target, available)); admit();
+        const answer = snapshot(raw) as unknown as StatefulCompleteKindKeyResultV1;
+        fields(answer, ['view', 'result', 'attempts']); consumeAttempts(answer.attempts, available);
         assertStatefulOwnerViewV2(d, answer.view, view);
-        const result = readValue(d, target, answer.results[0]);
+        const result = readValue(d, target, answer.result);
         check(result.status !== 'unavailable', 'Required query coverage unavailable', 'stateful.unavailable');
         await assertCurrent(); return result;
       }),
@@ -426,9 +432,7 @@ export async function composeStatefulOwnerCompleteKindReadV1(selection: Stateful
         const answer = snapshot(raw) as unknown as StatefulCompleteKindResultV1;
         fields(answer, ['view', 'kind', 'complete', 'rows', 'attempts']);
         check(answer.kind === kind && answer.complete === true, 'Complete declared-kind coverage unavailable', 'stateful.unavailable');
-        check(Number.isSafeInteger(answer.attempts) && answer.attempts >= 1 && answer.attempts <= available.readAttempts,
-          'Complete-kind native attempt total exceeded', 'stateful.unavailable');
-        attempts += answer.attempts - 1; assertStatefulOwnerViewV2(d, answer.view, view);
+        consumeAttempts(answer.attempts, available); assertStatefulOwnerViewV2(d, answer.view, view);
         check(Array.isArray(answer.rows) && answer.rows.length <= available.responseRecords,
           'Complete-kind record total exceeded', 'stateful.unavailable');
         const keys = new Set<string>();
