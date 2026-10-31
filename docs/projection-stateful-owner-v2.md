@@ -46,3 +46,17 @@ and reconcile retained raw/candidate/receipt state before issuing any serving
 grant. This source contract and controlled conformance evidence do not establish
 physical MongoDB crash safety, Wire workload acceptance, or full AtomicAssets/
 AtomicMarket SQL and HTTP parity.
+
+The optional [complete-kind interface version 1](adr/0003-optional-complete-kind-reads.md)
+adds a separately negotiated callback with `all(kind)` through that same completed
+read capability. Host and adapter offer `stateful-owner-complete-kind` version 1
+with explicit shared attempt/record/byte totals. `negotiateStatefulCompleteKindV1`
+returns a local selection for `composeStatefulOwnerCompleteKindReadV1`; ordinary
+get-only declarations, captures, capabilities and callbacks remain unchanged.
+The new callback uses `readCompletedKey` with an explicit remaining allowance
+and reported native attempts, including retries; it never uses the uncounted
+legacy keyed adapter operation. Authority/view inspections retain host guards
+and deadlines separately from the projection data-read attempt total.
+Missing support refuses before acquisition or callback execution. No public order,
+filter or pagination is introduced. Database exhaustion remains an adapter proof
+obligation and final HTTP publication remains the host's responsibility.
