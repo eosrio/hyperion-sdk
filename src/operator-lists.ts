@@ -68,7 +68,7 @@ export async function readOperatorListsV1(selection: OperatorListSelectionV1, pr
   try {raw=await provider.read(request,l);} finally {guard();}
   if (!fits(l,offer(provider.capabilities).limits) || typeof provider.read !== 'function') fail('Capability unavailable');
   const result=record(raw,['source','generation','complete','attempts','entries']);
-  if (result.source !== src || result.generation !== gen || result.complete !== true || !Number.isSafeInteger(result.attempts) || (result.attempts as number)<(ns.length ? 1 : 0) || (result.attempts as number)>l.attempts) fail('Incomplete or mismatched result');
+  if (result.source !== src || result.generation !== gen || result.complete !== true || !Number.isSafeInteger(result.attempts) || (result.attempts as number)<0 || (result.attempts as number)>l.attempts) fail('Incomplete or mismatched result');
   const entries=array(result.entries, ns.length); if (entries.length !== ns.length) fail('Incomplete entries');
   const captured=entries.map((entry,i) => {
     const e=record(entry,['name','items']); if (e.name !== ns[i]) fail('Entry mismatch');

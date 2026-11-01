@@ -77,3 +77,24 @@ test('capability drift while provider is pending fails before accepting results'
     await assert.rejects(pending);
   }
 });
+
+test('instrumented cache reports actual native attempts and preserves all result checks',async()=>{
+  let now=0, nativeReads=0, stored=['old']; const cache=new Map(), attempts=[];
+  const make=generation=>({capabilities:cap,async read(names) {
+    const key=`operator:${generation}:${names[0]}`; let hit=cache.get(key), actual=0;
+    if (!hit || now-hit.at>=300000) {nativeReads++; actual++; hit={at:now,items:[...stored]}; cache.set(key,hit);}
+    attempts.push(actual); return {source:'operator',generation,complete:true,attempts:actual,entries:[{name:names[0],items:hit.items}]};
+  }});
+  const get=async generation=>(await read(select(),make(generation),['a'],'operator',generation,()=>{})).entries[0].items;
+  assert.deepEqual(await get('g1'),['old']); stored=['new']; now=299999;
+  assert.deepEqual(await get('g1'),['old']); now=300000; assert.deepEqual(await get('g1'),['new']);
+  assert.deepEqual(await get('g2'),['new']); assert.deepEqual(await get('g2'),['new']);
+  assert.deepEqual(attempts,[1,0,1,1,0]); assert.equal(nativeReads,3);
+  for(const value of [-1,0.5,3]) await assert.rejects(run(provider([{name:'a',items:[]}],{attempts:value})));
+  for(const invalid of [{complete:false},{source:'other'},{generation:'other'}]) await assert.rejects(run(provider([{name:'a',items:[]}],{attempts:0,...invalid})));
+  await assert.rejects(run(provider([{name:'a',items:Array(6).fill('x')}],{attempts:0})));
+  await assert.rejects(run(provider([{name:'a',items:['x'.repeat(100)]}],{attempts:0})));
+  await assert.rejects(read(select(),make('g1'),['a','b','c','d'],'operator','g1',()=>{}));
+  await assert.rejects(read(select(),provider([{name:'a',items:[]}],{attempts:0}),['a'],'operator','config-1',()=>{throw Error('cancelled')}));
+  const bad=provider([{name:'a',items:[]}],{attempts:0}); bad.capabilities={...cap,interfaceVersion:2}; await assert.rejects(run(bad));
+});
