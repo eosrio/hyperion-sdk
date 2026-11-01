@@ -70,6 +70,7 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
     await readFile(join(root, 'tests/consumers/stateful-owner-v2.mts'), 'utf8'));
   await writeFile(join(consumer, 'stateful-complete-kind.mts'),
     await readFile(join(root, 'tests/consumers/stateful-complete-kind.mts'), 'utf8'));
+  await writeFile(join(consumer, 'operator-lists.mts'), await readFile(join(root, 'tests/consumers/operator-lists.mts'), 'utf8'));
   await writeFile(join(consumer, 'stateful-runtime.mjs'),
     await readFile(join(root, 'tests/consumers/stateful-projection.mjs'), 'utf8'));
   const reference = await readFile(join(root, 'tests/fixtures/stateful-reference.mjs'), 'utf8');
@@ -94,7 +95,7 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
     '--target', 'ES2022', '--module', 'NodeNext', '--resolveJsonModule', 'consumer.mts',
     'protocol-abi-observations.mts', 'protocol-native-actions.mts', 'projection.mts', 'projection-rollback.mts',
     'projection-recovery.mts', 'projection-contextual.mts', 'projection-contextual-recovery.mts', 'stateful-projection.mts', 'stateful-owner-v2.mts',
-    'stateful-complete-kind.mts'], { cwd: consumer, stdio: 'inherit' });
+    'stateful-complete-kind.mts', 'operator-lists.mts'], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'consumer.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'protocol-abi-observations.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'protocol-native-actions.mjs')], { cwd: consumer, stdio: 'inherit' });
@@ -108,6 +109,7 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
   execFileSync(process.execPath, [join(consumer, 'stateful-owner-v2.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'stateful-complete-kind.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, ['--test', join(consumer, 'tests/stateful-complete-kind.test.mjs')], { cwd: consumer, stdio: 'inherit' });
+  execFileSync(process.execPath, [join(consumer, 'operator-lists.mjs')], { cwd: consumer, stdio: 'inherit' });
   console.log('Packed ESM, JSON Schema and TypeScript consumer passed.');
 } finally {
   await rm(temporary, { recursive: true, force: true });

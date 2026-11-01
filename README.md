@@ -130,3 +130,5 @@ dependency installation build through `prepare`. `private: true` prevents accide
 These checks cover metadata/protocol selection, portable projection contracts and a packed ESM/TypeScript consumer. Host execution
 and chain/runtime qualification have their own acceptance evidence.
 Licensed under [MIT](LICENSE).
+
+The independent [operator-list read family](docs/operator-lists.md) supplies bounded, detached operator data reads without chain authority.

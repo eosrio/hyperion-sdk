@@ -1,0 +1,52 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {negotiateOperatorListsV1 as negotiate, readOperatorListsV1 as read} from '../dist/operator-lists.js';
+const limits={names:3,items:5,bytes:100,attempts:2};
+const cap={family:'operator-list-read',interfaceVersion:1,limits};
+const select=()=>negotiate(limits,cap,cap);
+const provider=(entries, extra={})=>({capabilities:cap,read:async()=>({source:'operator',generation:'config-1',complete:true,attempts:1,entries,...extra})});
+const run=(p,n=['a'])=>read(select(),p,n,'operator','config-1',()=>{});
+test('negotiation requires independent compatible bounded offers',()=>{
+  assert.throws(()=>negotiate(limits,cap,{...cap,interfaceVersion:2}));
+  assert.throws(()=>negotiate({...limits,items:6},cap,cap));
+  assert.throws(()=>negotiate({...limits,attempts:0},cap,cap));
+});
+test('complete empty and missing results remain distinct from unavailable',async()=>{
+  assert.deepEqual((await run(provider([{name:'a',items:[]}]))).entries[0].items,[]);
+  for(const bad of [provider([]),provider([{name:'a',items:[]}],{complete:false}),provider([{name:'a',items:[]}],{source:'other'}),provider([{name:'a',items:[]}],{generation:'other'}),provider([{name:'a',items:[]}],{attempts:3})]) await assert.rejects(run(bad));
+});
+test('results detach and freeze, preserve duplicate items and byte budgets',async()=>{
+  const rows=[{name:'a',items:['x','x']}]; const result=await run(provider(rows)); rows[0].items.push('later');
+  assert.deepEqual(result.entries[0].items,['x','x']); assert.ok(Object.isFrozen(result.entries[0].items));
+  await assert.rejects(run(provider([{name:'a',items:['é'.repeat(50)]}])));
+  await assert.rejects(run(provider([{name:'a',items:Array(6).fill('x')}])));
+  await assert.rejects(run(provider([]),['a','a']));
+});
+test('host cancellation after pending provider and malformed accessors fail closed',async()=>{
+  let release; let cancelled=false; const p=provider([]); p.read=()=>new Promise(r=>{release=r});
+  const pending=read(select(),p,['a'],'operator','config-1',()=>{if(cancelled) throw Error('cancelled')});
+  cancelled=true; release({source:'operator',generation:'config-1',complete:true,attempts:1,entries:[{name:'a',items:[]}]}); await assert.rejects(pending,/cancelled/);
+  let called=0; const row={name:'a'}; Object.defineProperty(row,'items',{enumerable:true,get(){called++;return []}});
+  await assert.rejects(run(provider([row]))); assert.equal(called,0);
+});
+test('Atomic schema request shape: comma tokens, nonrecursive expansion, duplicates and empty filter',async()=>{
+  // Mirrors reference lists.ts and schemas.ts; the SDK deliberately does not parse domain input.
+  const tokens='$list:whitelist,alpha,$list:missing,$list:whitelist'.split(',');
+  const names=[...new Set(tokens.filter(x=>x.startsWith('$list:')).map(x=>x.slice(6)))];
+  const out=await run(provider([{name:'whitelist',items:['beta','$list:nested']},{name:'missing',items:[]}]),names);
+  const map=new Map(out.entries.map(e=>[e.name,e.items]));
+  const expanded=tokens.flatMap(x=>x.startsWith('$list:')?map.get(x.slice(6)):[x]);
+  assert.deepEqual(expanded,['beta','$list:nested','alpha','beta','$list:nested']);
+  assert.equal((await run(provider([{name:'missing',items:[]}]),['missing'])).entries[0].items.length,0);
+});
+
+test('five-minute reference cache keeps old data on ordinary update but isolates source generations',async()=>{
+  let now=0, items=['old']; const cache=new Map();
+  const cached=(generation)=>({capabilities:cap,read:async names=>{const key=`operator:${generation}:${names[0]}`; let hit=cache.get(key);
+    if (!hit || now-hit.at>=300000) {hit={at:now,items:[...items]};cache.set(key,hit)}
+    return {source:'operator',generation,complete:true,attempts:1,entries:[{name:names[0],items:hit.items}]};}});
+  const get=async generation=>(await read(select(),cached(generation),['a'],'operator',generation,()=>{})).entries[0].items;
+  assert.deepEqual(await get('config-1'),['old']); items=['new']; now=299999;
+  assert.deepEqual(await get('config-1'),['old']); assert.deepEqual(await get('config-2'),['new']);
+  now=300000; assert.deepEqual(await get('config-1'),['new']);
+});
