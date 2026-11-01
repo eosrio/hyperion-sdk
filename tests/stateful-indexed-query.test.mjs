@@ -28,3 +28,6 @@ test('declaration and independent offers bind the actual owner generation',async
  const second=await indexed.captureIndexedDeclarationV1(other,'revision1',s.dcl.model);assert.notEqual(second.ownerDeclarationDigest,s.dcl.ownerDeclarationDigest);assert.notEqual(second.digest,s.dcl.digest);assert.throws(()=>indexed.negotiateIndexedQueryV1(second,s.bounds,s.offer(),s.offer()));
  const unnegotiated=await owner.captureStatefulOwnerDeclarationV2(projection,2);await assert.rejects(indexed.captureIndexedDeclarationV1(unnegotiated,'revision1',s.dcl.model));
 });
+test('literal text-contains capture preserves dots, wildcard-looking symbols and case without rewriting',async()=>{
+ const {sel}=await setup();for(const value of ['a.b','a%b','a_b','UPPER','']){const captured=indexed.captureIndexedRequestV1(sel,{kind:'count',exact:true,where:[{field:'schema',op:'text-contains',value}]});assert.equal(captured.where[0].value,value);}
+});

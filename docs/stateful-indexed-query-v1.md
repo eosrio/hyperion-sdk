@@ -7,7 +7,12 @@ profile is a negotiated name, not an SDK claim that PostgreSQL and another engin
 The SDK implements no adapter, execution, publication or endpoint in this slice. In particular,
 the PostgreSQL en_US.utf8 observation does not establish a binary comparison profile.
 
-All predicates are conjunctive. Empty `in` remains a match-none predicate; `not-in` applies
+All predicates are conjunctive. `text-contains` tests a literal contiguous substring of
+the stored field; it does not interpret wildcard characters or add case folding or Unicode
+normalization. `array-contains` tests whole-element membership. A comparison profile must
+explicitly qualify the source semantics; a matching name alone is not physical proof.
+The Atomic handler validates `match` as a name first, then lowercases the accepted input;
+the plugin owns that validation and transformation before capture. Empty `in` remains a match-none predicate; `not-in` applies
 only to declared nonnullable text. Nulls-last remains explicit for every allowed order tuple.
 Offsets and exact counts are signed-int64 decimal strings; count is nonnegative. Pages use
 an offset and limit, never a hidden substitution to keyset or application-side full-kind scan.

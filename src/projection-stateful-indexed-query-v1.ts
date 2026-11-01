@@ -6,6 +6,10 @@ import type {StatefulView, StatefulRecord} from './stateful-types.js';
 
 /** Additive declaration and negotiation only. No adapter or serving capability is implemented here. */
 export const STATEFUL_INDEXED_QUERY_FAMILY_V1 = 'stateful-owner-indexed-query' as const;
+/** `text-contains` means literal contiguous substring, with no wildcard expansion,
+ * implicit case folding or normalization. The explicitly offered comparison profile
+ * must qualify those semantics for the source; this SDK does not supply one.
+ * `array-contains` means membership of one text element, not substring matching. */
 type Op = 'eq'|'in'|'not-in'|'gte'|'gt'|'lt'|'array-contains'|'text-contains';
 export interface IndexedLimitsV1 {readonly readAttempts:number;readonly responseRecords:number;readonly responseBytes:number;readonly queryBytes:number;readonly predicates:number;readonly orderTerms:number;readonly setValues:number}
 export interface IndexedOrderV1 {readonly field:string;readonly direction:'asc'|'desc';readonly nulls:'last'}

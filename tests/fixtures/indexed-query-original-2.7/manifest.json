@@ -1,0 +1,25 @@
+{
+  "commit": "0aabc47dcf8bd0804d4dcecb336c90fc02a9c89e",
+  "sources": {
+    "schemas.ts": {
+      "sourcePath": "src/api/namespaces/atomicassets/handlers/schemas.ts",
+      "bytes": 5581,
+      "sha256": "9af0899d2e53e538f34abff204abdbc9aba08807b1f03be72ae718ff4d41887e"
+    },
+    "validation.ts": {
+      "sourcePath": "src/api/namespaces/validation.ts",
+      "bytes": 5416,
+      "sha256": "daca1f17ad21cd4bafc72e12f240d644e9a3517451cd9ca64b861c87c26f51b1"
+    },
+    "builder.ts": {
+      "sourcePath": "src/api/builder.ts",
+      "bytes": 4617,
+      "sha256": "2ae1e3b89da2e42e826e00eed65fda2576a4da7b83fbc6cc3ccedc6e72b8cbf3"
+    },
+    "LICENSE": {
+      "sourcePath": "LICENSE",
+      "bytes": 1140,
+      "sha256": "458f83058135a4425dcbdcbeb51586dad3ca7b2d6c999fcd16b1a064c9acfa3e"
+    }
+  }
+}

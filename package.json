@@ -57,7 +57,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "bun check -p tsconfig.json",
-    "test": "npm run build && node --test tests/manifest.test.mjs tests/compatibility.test.mjs tests/protocol.test.mjs tests/protocol-native-actions.test.mjs tests/projection.test.mjs tests/projection-rollback.test.mjs tests/projection-recovery.test.mjs tests/contextual-projection.test.mjs tests/contextual-projection-recovery.test.mjs tests/structured-values.test.mjs tests/stateful-projection.test.mjs tests/stateful-input-v2.test.mjs tests/stateful-ownership.test.mjs tests/stateful-source-v2.test.mjs tests/stateful-action-metadata.test.mjs tests/stateful-owner-v2.test.mjs tests/stateful-complete-kind.test.mjs tests/operator-lists.test.mjs tests/stateful-indexed-query.test.mjs",
+    "test": "npm run build && node --test tests/manifest.test.mjs tests/compatibility.test.mjs tests/protocol.test.mjs tests/protocol-native-actions.test.mjs tests/projection.test.mjs tests/projection-rollback.test.mjs tests/projection-recovery.test.mjs tests/contextual-projection.test.mjs tests/contextual-projection-recovery.test.mjs tests/structured-values.test.mjs tests/stateful-projection.test.mjs tests/stateful-input-v2.test.mjs tests/stateful-ownership.test.mjs tests/stateful-source-v2.test.mjs tests/stateful-action-metadata.test.mjs tests/stateful-owner-v2.test.mjs tests/stateful-complete-kind.test.mjs tests/operator-lists.test.mjs tests/stateful-indexed-query.test.mjs tests/stateful-indexed-original-source.test.mjs",
     "test:package": "node scripts/check-package.mjs",
     "check:docs": "python scripts/check-docs.py",
     "prepare": "npm run build"
