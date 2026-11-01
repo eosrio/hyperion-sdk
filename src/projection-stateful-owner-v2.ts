@@ -2,6 +2,7 @@ import {canonicalStructuredJsonRecord} from './internal/structured-values.js';
 import {isCapturedStatefulDeclaration} from './internal/stateful-ownership.js';
 import {captureRawStatefulTarget} from './internal/stateful-input-v2.js';
 import {executionApply, executionCompose, type ExecutionPolicy, type ExecutionPort} from './internal/stateful-execution.js';
+import {validateOwnerCapabilities as validateCapabilities, withOwnerCompletedRead} from './internal/stateful-owner-read.js';
 import {captureStatefulDeclaration, canonicalStatefulRecord, StatefulContractError, STATEFUL_RECOVERY_LIMITS} from './projection-stateful.js';
 import {captureStatefulSourceV2, type CapturedStatefulSourceV2} from './projection-stateful-source-v2.js';
 import type {ProjectionCheckpoint} from './projection.js';
@@ -9,7 +10,7 @@ import type {StructuredRecord} from './internal/structured-values.js';
 import type {StatefulDeclaration, StatefulGuard, StatefulKey, StatefulLimits, StatefulMutation,
   StatefulRead, StatefulRollback, StatefulView} from './stateful-types.js';
 import type {CapturedRawStatefulTargetV2, StatefulCandidateStoreV2, StatefulCandidateV2,
-  StatefulOwnerAdapterV2, StatefulOwnerCapabilitiesV2, StatefulOwnerDeclarationV2, StatefulOwnerIdentityV2,
+  StatefulOwnerAdapterV2, StatefulOwnerDeclarationV2, StatefulOwnerIdentityV2,
   StatefulOwnedInspectionV2, StatefulOwnerLeaseV2, StatefulOwnerRecoveryV2, StatefulReductionReadV2, StatefulReductionV2,
   StatefulCompleteKindAdapterV1, StatefulCompleteKindCapabilitiesV1, StatefulCompleteKindLimitsV1,
   StatefulCompleteKindReadV1, StatefulCompleteKindResultV1, StatefulCompleteKindKeyResultV1,
@@ -92,23 +93,6 @@ export async function receiveStatefulOwnerDeclarationV2(input: unknown): Promise
   const result = await captureStatefulOwnerDeclarationV2(projection, 2); check(result.digest === expected, 'Owner declaration digest differs'); return result;
 }
 
-async function validateCapabilities(projection: StatefulDeclaration, input: unknown, required: readonly string[]): Promise<void> {
-  const limits = projection.limits, value = detach<StatefulOwnerCapabilitiesV2>(input, limits);
-  fields(value, ['family', 'interfaceVersion', 'sourceInputVersions', 'supported', 'limits']);
-  check(value.family === STATEFUL_OWNER_FAMILY_V2 && value.interfaceVersion === 2
-    && Array.isArray(value.sourceInputVersions) && value.sourceInputVersions.length === 1 && value.sourceInputVersions[0] === 2,
-    'Owner source version/capability family differs', 'stateful.capability-unavailable');
-  check(Array.isArray(value.supported) && value.supported.length === required.length
-    && new Set(value.supported).size === value.supported.length
-    && required.every(item => value.supported.includes(item)), 'Missing/unknown owner capabilities', 'stateful.capability-unavailable');
-  const offered = (await captureStatefulDeclaration(projection.definition, value.limits)).limits;
-  for (const name of Object.keys(limits) as (keyof StatefulLimits)[]) {
-    if (name === 'value' || name === 'envelope') {
-      for (const field of Object.keys(limits[name]) as (keyof StatefulLimits['value'])[])
-        check(limits[name][field] <= offered[name][field], 'Owner structured bound unavailable', 'stateful.capability-unavailable');
-    } else check(limits[name] <= offered[name], 'Owner family bound unavailable', 'stateful.capability-unavailable');
-  }
-}
 export async function negotiateStatefulOwnerV2(projection: StatefulDeclaration, host: unknown, adapter: unknown): Promise<StatefulOwnerDeclarationV2> {
   check(isCapturedStatefulDeclaration(projection), 'Recapture the immutable projection declaration');
   const hostInput = detach(host, projection.limits), adapterInput = detach(adapter, projection.limits);
@@ -313,16 +297,13 @@ export async function composeStatefulOwnerReadV2(d: StatefulOwnerDeclarationV2, 
   expectedOwner: StatefulOwnerIdentityV2, expectedView: StatefulView,
   compose: (reader: import('./stateful-types.js').StatefulQueryRead) => Promise<unknown>, guard: StatefulGuard):
   Promise<{readonly view: StatefulView; readonly value: StructuredRecord}> {
-  owned(d, true); const owner = detach<StatefulOwnerIdentityV2>(expectedOwner, d.projection.limits), view = captureStatefulOwnerViewV2(d, expectedView);
-  fields(owner, ['id', 'generation']); text(owner.id, d.projection.limits); text(owner.generation, d.projection.limits);
-  await guarded(guard, () => validateCapabilities(d.projection, adapter.capabilities, STATEFUL_OWNER_ADAPTER_CAPABILITIES_V2));
-  let read: Awaited<ReturnType<StatefulOwnerAdapterV2['completedRead']>> | undefined;
-  try {
-    guard(); read = await adapter.completedRead(owner, view, guard); guard(); const selected = read;
-    return await executionCompose(executionPolicy(d, '0'.repeat(64)), {
+  return withOwnerCompletedRead(d, adapter, expectedOwner, expectedView, guard, {
+    admit: () => owned(d, true), view: input => captureStatefulOwnerViewV2(d, input),
+    requiredCapabilities: STATEFUL_OWNER_ADAPTER_CAPABILITIES_V2
+  }, async (selected, view) =>
+    executionCompose(executionPolicy(d, '0'.repeat(64)), {
       currentView: () => adapter.completedView(selected), read: (expected, keys) => adapter.readCompleted(selected, expected, keys)
-    }, view, compose, guard);
-  } finally {if (read !== undefined) adapter.closeRead(read);}
+    }, view, compose, guard));
 }
 
 export const STATEFUL_COMPLETE_KIND_FAMILY_V1 = 'stateful-owner-complete-kind' as const;

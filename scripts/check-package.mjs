@@ -80,7 +80,8 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
   await writeFile(join(consumer, 'stateful-reference.mjs'), reference.replace(sourceImport, '@eosrio/hyperion-sdk/projection-stateful'));
   await mkdir(join(consumer, 'tests/fixtures'), {recursive: true});
   for (const relative of ['stateful-complete-kind.test.mjs', 'fixtures/stateful-complete-kind-reference.mjs', 'fixtures/stateful-reference.mjs',
-    'fixtures/stateful-legacy-captures.mjs', 'fixtures/complete-kind-legacy.json']) {
+    'fixtures/stateful-legacy-captures.mjs', 'fixtures/complete-kind-legacy.json', 'stateful-indexed-runtime.test.mjs',
+    'fixtures/stateful-indexed-runtime-reference.mjs']) {
     let content = await readFile(join(root, 'tests', relative), 'utf8');
     content = content.replace('../dist/projection-stateful-owner-v2.js?independent-complete-kind',
       '../node_modules/@eosrio/hyperion-sdk/dist/projection-stateful-owner-v2.js?independent-complete-kind');
@@ -89,6 +90,10 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
       .replaceAll('../../dist/projection-stateful.js', '@eosrio/hyperion-sdk/projection-stateful')
       .replaceAll('../dist/projection-stateful.js', '@eosrio/hyperion-sdk/projection-stateful');
     content = content.replaceAll('../../dist/projection-stateful-source-v2.js', '@eosrio/hyperion-sdk/projection-stateful-source-v2');
+    content = content.replace('../dist/projection-stateful-indexed-query-v1.js?independent-runtime',
+      '../node_modules/@eosrio/hyperion-sdk/dist/projection-stateful-indexed-query-v1.js?independent-runtime');
+    content = content.replaceAll('../../dist/projection-stateful-indexed-query-v1.js', '@eosrio/hyperion-sdk/projection-stateful-indexed-query-v1')
+      .replaceAll('../dist/projection-stateful-indexed-query-v1.js', '@eosrio/hyperion-sdk/projection-stateful-indexed-query-v1');
     await writeFile(join(consumer, 'tests', relative), content);
   }
   // No @types/node dependency is needed by the consumer; declarations must be independently usable.
@@ -110,6 +115,7 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
   execFileSync(process.execPath, [join(consumer, 'stateful-owner-v2.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'stateful-complete-kind.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, ['--test', join(consumer, 'tests/stateful-complete-kind.test.mjs')], { cwd: consumer, stdio: 'inherit' });
+  execFileSync(process.execPath, ['--test', join(consumer, 'tests/stateful-indexed-runtime.test.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'operator-lists.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'stateful-indexed-query-v1.mjs')], { cwd: consumer, stdio: 'inherit' });
   console.log('Packed ESM, JSON Schema and TypeScript consumer passed.');
