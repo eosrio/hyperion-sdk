@@ -50,3 +50,29 @@ test('five-minute reference cache keeps old data on ordinary update but isolates
   assert.deepEqual(await get('config-1'),['old']); assert.deepEqual(await get('config-2'),['new']);
   now=300000; assert.deepEqual(await get('config-1'),['new']);
 });
+
+test('proxy names, entries, items and records are rejected without invoking traps',async()=>{
+  let traps=0; const proxy=x=>new Proxy(x,{get(t,k,r){traps++; return Reflect.get(t,k,r)},getPrototypeOf(t){traps++;return Reflect.getPrototypeOf(t)},ownKeys(t){traps++;return Reflect.ownKeys(t)},getOwnPropertyDescriptor(t,k){traps++;return Reflect.getOwnPropertyDescriptor(t,k)}});
+  await assert.rejects(run(provider([]),proxy(['a']))); assert.equal(traps,0);
+  await assert.rejects(run(provider(proxy([{name:'a',items:['alice']}])))); assert.equal(traps,0);
+  await assert.rejects(run(provider([{name:'a',items:proxy(['alice'])}]))); assert.equal(traps,0);
+  await assert.rejects(run(provider([proxy({name:'a',items:[]})]))); assert.equal(traps,0);
+  let intercepted=0; const entries=new Proxy([{name:'a',items:['alice']}],{get(t,k,r){intercepted++; if(k==='map') return ()=>[]; return Reflect.get(t,k,r)}});
+  await assert.rejects(run(provider(entries))); assert.equal(intercepted,0);
+});
+test('sparse extended and accessor arrays refuse before invoking accessors',async()=>{
+  let called=0; const sparse=Array(1); const extended=['a']; extended.extra=true;
+  const accessor=['a']; Object.defineProperty(accessor,0,{enumerable:true,get(){called++;return 'a'}});
+  for(const a of [sparse,extended,accessor]) await assert.rejects(run(provider([]),a));
+  assert.equal(called,0);
+  const items=['x']; Object.defineProperty(items,0,{enumerable:true,get(){called++;return 'x'}});
+  await assert.rejects(run(provider([{name:'a',items}]))); assert.equal(called,0);
+});
+test('capability drift while provider is pending fails before accepting results',async()=>{
+  for(const changed of [{...cap,family:'other'},{...cap,interfaceVersion:2},{...cap,limits:{...limits,items:0}}]) {
+    let release; const p=provider([]); p.read=()=>new Promise(r=>{release=r});
+    const pending=run(p); p.capabilities=changed;
+    release({source:'operator',generation:'config-1',complete:true,attempts:1,entries:[{name:'a',items:[]}]});
+    await assert.rejects(pending);
+  }
+});
