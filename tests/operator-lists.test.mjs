@@ -18,7 +18,8 @@ test('complete empty and missing results remain distinct from unavailable',async
 test('results detach and freeze, preserve duplicate items and byte budgets',async()=>{
   const rows=[{name:'a',items:['x','x']}]; const result=await run(provider(rows)); rows[0].items.push('later');
   assert.deepEqual(result.entries[0].items,['x','x']); assert.ok(Object.isFrozen(result.entries[0].items));
-  await assert.rejects(run(provider([{name:'a',items:['é'.repeat(50)]}])));
+  assert.equal((await run(provider([{name:'a',items:['\u00e9'.repeat(49)]}]))).entries[0].items[0].length,49);
+  await assert.rejects(run(provider([{name:'a',items:['\u00e9'.repeat(50)]}])));
   await assert.rejects(run(provider([{name:'a',items:Array(6).fill('x')}])));
   await assert.rejects(run(provider([]),['a','a']));
 });
