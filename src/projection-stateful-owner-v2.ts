@@ -456,3 +456,6 @@ export async function composeStatefulOwnerCompleteKindReadV1(selection: Stateful
     } finally {active = false;}
   } finally {active = false; if (read !== undefined) adapter.closeRead(read);}
 }
+
+/** Internal additive families must bind an already negotiated local owner, not a copied DTO. */
+export function assertNegotiatedStatefulOwnerV2(declaration: StatefulOwnerDeclarationV2): void { owned(declaration, true); }
