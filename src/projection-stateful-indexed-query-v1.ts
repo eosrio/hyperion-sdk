@@ -1,10 +1,13 @@
 import {types} from 'node:util';
-import {assertNegotiatedStatefulOwnerV2} from './projection-stateful-owner-v2.js';
+import {assertNegotiatedStatefulOwnerV2, assertStatefulOwnerViewV2, captureStatefulOwnerViewV2,
+ STATEFUL_OWNER_ADAPTER_CAPABILITIES_V2} from './projection-stateful-owner-v2.js';
 import {canonicalStructuredJsonRecord, validateStructuredInteger} from './internal/structured-values.js';
-import type {StatefulOwnerDeclarationV2, StatefulCompletedReadV2} from './stateful-owner-v2-types.js';
-import type {StatefulView, StatefulRecord} from './stateful-types.js';
+import {withOwnerCompletedRead} from './internal/stateful-owner-read.js';
+import {canonicalStatefulRecord, StatefulContractError} from './projection-stateful.js';
+import type {StatefulOwnerDeclarationV2, StatefulCompletedReadV2, StatefulOwnerAdapterV2, StatefulOwnerIdentityV2} from './stateful-owner-v2-types.js';
+import type {StatefulView, StatefulRecord, StatefulGuard, StatefulQueryResult} from './stateful-types.js';
 
-/** Additive declaration and negotiation only. No adapter or serving capability is implemented here. */
+/** Optional portable indexed-query family; native execution and materialization remain adapter-owned. */
 export const STATEFUL_INDEXED_QUERY_FAMILY_V1 = 'stateful-owner-indexed-query' as const;
 /** `text-contains` means literal contiguous substring, with no wildcard expansion,
  * implicit case folding or normalization. The explicitly offered comparison profile
@@ -22,8 +25,15 @@ declare const selectionBrand:unique symbol;
 export interface IndexedSelectionV1 {readonly family:typeof STATEFUL_INDEXED_QUERY_FAMILY_V1;readonly interfaceVersion:1;readonly declaration:IndexedDeclarationV1;readonly limits:IndexedLimitsV1;readonly [selectionBrand]:true}
 export type IndexedResultV1 = {readonly kind:'count';readonly exact:true;readonly value:string}|{readonly kind:'page';readonly complete:true;readonly rows:readonly {readonly key:string;readonly fields:Readonly<Record<string,string|readonly string[]|null>>;readonly records:Readonly<Record<string,StatefulRecord|null>>}[]};
 /** This adapter port is not a grant: host supplies the already issued completed read and guards. */
-export interface IndexedAdapterV1 {queryCompleted(read:StatefulCompletedReadV2,expected:StatefulView,request:IndexedRequestV1,remaining:IndexedLimitsV1):Promise<{readonly view:StatefulView;readonly queryDeclarationDigest:string;readonly result:IndexedResultV1;readonly attempts:number}>}
+export interface IndexedAdapterV1 {queryCompleted(read:StatefulCompletedReadV2,expected:StatefulView,request:IndexedRequestV1,remaining:IndexedLimitsV1,selected?:IndexedDeclarationV1):Promise<{readonly view:StatefulView;readonly queryDeclarationDigest:string;readonly result:IndexedResultV1;readonly attempts:number}>}
 export interface IndexedReadV1 {readonly view:StatefulView;query(request:IndexedRequestV1):Promise<IndexedResultV1>}
+/** Same adapter and opaque completed-read capability as owner-v2. No new owner state or authority is supplied. */
+export interface IndexedOwnerAdapterV1 extends StatefulOwnerAdapterV2, IndexedAdapterV1 {readonly indexedCapabilities:IndexedOfferV1}
+/** Request-scoped plugin port. The actual host selects model, live owner, view and existing deadline. */
+export interface IndexedQueryHostV1 {
+ readonly indexedCapabilities:IndexedOfferV1;
+ compose(projectionId:string,use:(read:IndexedReadV1)=>Promise<StatefulRecord>):Promise<StatefulQueryResult>;
+}
 const declarations=new WeakMap<object,StatefulOwnerDeclarationV2>(),selections=new WeakSet<object>();
 function err(message:string):never {throw new TypeError('Indexed query: '+message);}
 function object(v:unknown,keys:readonly string[]):Record<string,unknown>{if(!v||typeof v!=='object'||types.isProxy(v)||Array.isArray(v)||![Object.prototype,null].includes(Object.getPrototypeOf(v))||Object.getOwnPropertySymbols(v).length)err('inert record required');const d=Object.getOwnPropertyDescriptors(v);if(Object.keys(d).length!==keys.length||keys.some(k=>!d[k]?.enumerable||!Object.hasOwn(d[k]!, 'value')))err('unexpected fields or accessors');return Object.fromEntries(keys.map(k=>[k,d[k]!.value]));}
@@ -51,8 +61,11 @@ export async function captureIndexedDeclarationV1(owner:StatefulOwnerDeclaration
 /** Both independent offers must explicitly list this digest and comparison profile. */
 export function negotiateIndexedQueryV1(declaration:IndexedDeclarationV1,requested:IndexedLimitsV1,host:IndexedOfferV1,adapter:IndexedOfferV1):IndexedSelectionV1{
  const owner=declarations.get(declaration);if(!owner)err('local declaration required');assertNegotiatedStatefulOwnerV2(owner);const l=limit(requested);const own=owner.projection.limits;if(l.readAttempts>own.readAttempts||l.responseRecords>own.responseRecords||l.responseBytes>own.responseBytes)err('owner limit exceeded');
- for(const raw of [host,adapter]){const o=object(raw,['family','interfaceVersion','queryDeclarationDigests','comparisonProfiles','limits']);if(o.family!==STATEFUL_INDEXED_QUERY_FAMILY_V1||o.interfaceVersion!==1)err('family unavailable');const ds=array(o.queryDeclarationDigests).map(text),ps=array(o.comparisonProfiles).map(id),available=limit(o.limits);if(new Set(ds).size!==ds.length||new Set(ps).size!==ps.length||!ds.includes(declaration.digest)||!ps.includes(declaration.model.textComparison)||(Object.keys(l) as (keyof IndexedLimitsV1)[]).some(k=>l[k]>available[k]))err('capability unavailable');}
+ for(const raw of [host,adapter])assertOffer(declaration,l,raw);
  const s=Object.freeze({family:STATEFUL_INDEXED_QUERY_FAMILY_V1,interfaceVersion:1 as const,declaration,limits:l}) as IndexedSelectionV1;selections.add(s);return s;
+}
+function assertOffer(declaration:IndexedDeclarationV1,l:IndexedLimitsV1,raw:unknown):void {
+ const o=object(raw,['family','interfaceVersion','queryDeclarationDigests','comparisonProfiles','limits']);if(o.family!==STATEFUL_INDEXED_QUERY_FAMILY_V1||o.interfaceVersion!==1)err('family unavailable');const ds=array(o.queryDeclarationDigests).map(text),ps=array(o.comparisonProfiles).map(id),available=limit(o.limits);if(new Set(ds).size!==ds.length||new Set(ps).size!==ps.length||!ds.includes(declaration.digest)||!ps.includes(declaration.model.textComparison)||(Object.keys(l) as (keyof IndexedLimitsV1)[]).some(k=>l[k]>available[k]))err('capability unavailable');
 }
 /** Capture and reject unsupported input before any adapter work. */
 export function captureIndexedRequestV1(selection:IndexedSelectionV1,input:IndexedRequestV1):IndexedRequestV1{
@@ -69,4 +82,155 @@ export function captureIndexedCountV1(selection:IndexedSelectionV1,input:unknown
  const value=object(input,['kind','exact','value']);if(value.kind!=='count'||value.exact!==true)err('exact count required');
  validateStructuredInteger(value.value,'int64');if((value.value as string).startsWith('-'))err('negative count');
  return Object.freeze({kind:'count',exact:true,value:value.value as string});
+}
+
+function selectedOwner(selection:IndexedSelectionV1):StatefulOwnerDeclarationV2 {
+ if(!selection||!selections.has(selection))err('local negotiation required');
+ const owner=declarations.get(selection.declaration);if(!owner)err('local declaration required');
+ assertNegotiatedStatefulOwnerV2(owner);return owner;
+}
+function storedPath(record:StatefulRecord,path:readonly string[]):unknown {
+ let value:unknown=record;
+ for(const key of path){if(value===null||typeof value!=='object'||Array.isArray(value)||!Object.hasOwn(value,key))err('required stored field is missing');value=(value as Record<string,unknown>)[key];}
+ return value;
+}
+function fieldValue(owner:StatefulOwnerDeclarationV2,field:IndexedModelV1['fields'][number],input:unknown):string|readonly string[]|null {
+ if(input===null){if(!field.nullable)err('nonnullable field is null');return null;}
+ const checkText=(value:unknown):string=>{
+  if(typeof value!=='string')err('stored field type differs');
+  canonicalStructuredJsonRecord({value},[],owner.projection.limits.value);return value;
+ };
+ if(field.type==='text-vector')return Object.freeze(array(input,owner.projection.limits.value.arrayElements).map(checkText));
+ const value=checkText(input);if(field.type==='int64')validateStructuredInteger(value,'int64');return value;
+}
+
+/** Capture only the complete requested window or an exact count. No comparator, planner or coverage authority is inferred. */
+export function captureIndexedResultV1(selection:IndexedSelectionV1,requested:IndexedRequestV1,input:unknown):IndexedResultV1 {
+ const owner=selectedOwner(selection),request=captureIndexedRequestV1(selection,requested),model=selection.declaration.model;
+ if(request.kind==='count')return captureIndexedCountV1(selection,input);
+ const page=object(input,['kind','complete','rows']);if(page.kind!=='page'||page.complete!==true)err('complete requested window required');
+ const keys=new Set<string>(),aliases=[model.base,...model.joins];
+ const rows=array(page.rows,Math.min(request.limit,selection.limits.responseRecords)).map(raw=>{
+  const row=object(raw,['key','fields','records']);
+  if(typeof row.key!=='string'||row.key.length===0||new TextEncoder().encode(row.key).length>owner.projection.limits.keyBytes)err('invalid base key');
+  canonicalStructuredJsonRecord({key:row.key},[],owner.projection.limits.value);
+  if(keys.has(row.key))err('duplicate base identity');keys.add(row.key);
+  const values=object(row.fields,request.select),payloads=object(row.records,request.records);
+  const records=Object.fromEntries(request.records.map(alias=>{
+   const source=aliases.find(item=>item.alias===alias)!,value=payloads[alias];
+   if(value===null){if(!model.joins.some(join=>join.alias===alias&&join.mode==='left-one'))err('required record is absent');return [alias,null] as const;}
+   const record=canonicalStatefulRecord(owner.projection,source.kind,value).value;
+   for(const field of model.fields.filter(field=>field.alias===alias))fieldValue(owner,field,storedPath(record,field.path));
+   return [alias,record] as const;
+  }));
+  const fields=Object.fromEntries(request.select.map(name=>{
+   const field=model.fields.find(field=>field.id===name)!,value=fieldValue(owner,field,values[name]);
+   if(Object.hasOwn(records,field.alias)){
+    const record=records[field.alias];
+    if(record===null?value!==null:!equal(value,fieldValue(owner,field,storedPath(record!,field.path))))err('selected field differs from its canonical record');
+   }
+   return [name,value] as const;
+  }));
+  const base=Object.hasOwn(records,model.base.alias)?records[model.base.alias]:undefined;
+  if(base)for(const join of model.joins){const joined=Object.hasOwn(records,join.alias)?records[join.alias]:undefined;if(joined)for(const pair of join.on)
+   if(!equal(storedPath(base,pair.basePath),storedPath(joined,pair.joinedPath)))err('returned records do not satisfy the declared join');}
+  return Object.freeze({key:row.key,fields:Object.freeze(fields),records:Object.freeze(records)});
+ });
+ const result=Object.freeze({kind:'page' as const,complete:true as const,rows:Object.freeze(rows)});
+ canonicalStructuredJsonRecord(result,[],{...owner.projection.limits.envelope,
+  recordBytes:Math.min(owner.projection.limits.envelope.recordBytes,selection.limits.responseBytes)});
+ return result;
+}
+
+function runtimeCheck(ok:unknown,message:string,code='stateful.unavailable'):asserts ok {
+ if(!ok)throw new StatefulContractError(code,'Indexed query: '+message);
+}
+const publications=new WeakMap<object,{readonly guard:StatefulGuard;readonly value:StatefulRecord}>();
+
+/**
+ * Execute through one existing adapter-issued owner-v2 completed read. The host's guard retains
+ * actual cancellation/deadline, live-owner, mapping/ABI, canonical and coverage authority.
+ */
+export async function composeStatefulOwnerIndexedReadV1(selection:IndexedSelectionV1,adapter:IndexedOwnerAdapterV1,
+ expectedOwner:StatefulOwnerIdentityV2,expectedView:StatefulView,use:(reader:IndexedReadV1)=>Promise<unknown>,guard:StatefulGuard):Promise<StatefulQueryResult> {
+ const owner=selectedOwner(selection),limits=selection.limits,declaration=selection.declaration;
+ let open=true,accepting=true,busy=false,failed=false,failure:unknown;
+ const used:Record<keyof IndexedLimitsV1,number>={readAttempts:0,responseRecords:0,responseBytes:0,queryBytes:0,predicates:0,orderTerms:0,setValues:0};
+ const poison=(error:unknown)=>{if(!failed){failed=true;failure=error;}return failure;};
+ const publicationGuard=()=>{if(failed)throw failure;try{guard();}catch(error){throw poison(error);}};
+ const lifetime=()=>{
+  publicationGuard();runtimeCheck(open,'completed-read scope is closed');
+  runtimeCheck(typeof adapter.queryCompleted==='function','indexed operation unavailable','stateful.capability-unavailable');
+  try{assertOffer(declaration,limits,adapter.indexedCapabilities);}catch{throw new StatefulContractError('stateful.capability-unavailable','Indexed query capability changed or unavailable');}
+ };
+ const admit=()=>{lifetime();runtimeCheck(accepting,'query port is closed');};
+ const remaining=():IndexedLimitsV1=>Object.freeze(Object.fromEntries((Object.keys(limits) as (keyof IndexedLimitsV1)[]).map(key=>[key,limits[key]-used[key]])) as unknown as IndexedLimitsV1);
+ const charge=(key:keyof IndexedLimitsV1,amount:number)=>{
+  runtimeCheck(Number.isSafeInteger(amount)&&amount>=0&&amount<=limits[key]-used[key],key+' total exceeded');used[key]+=amount;
+ };
+ const snapshot=(input:unknown)=>{
+  let captured:ReturnType<typeof canonicalStructuredJsonRecord>;
+  try{captured=canonicalStructuredJsonRecord(input,[],{...owner.projection.limits.envelope,
+   recordBytes:Math.min(owner.projection.limits.envelope.recordBytes,remaining().responseBytes)});}
+  catch(error){throw new StatefulContractError('stateful.unavailable','Indexed response capture refused: '+(error instanceof Error?error.message:'invalid envelope'));}
+  charge('responseBytes',captured.bytes);return captured.value;
+ };
+ try {
+  lifetime();
+  const composed=await withOwnerCompletedRead(owner,adapter,expectedOwner,expectedView,lifetime,{
+   admit:()=>assertNegotiatedStatefulOwnerV2(owner),view:input=>captureStatefulOwnerViewV2(owner,input),
+   requiredCapabilities:STATEFUL_OWNER_ADAPTER_CAPABILITIES_V2
+  },async(read,view)=>{
+   const current=async()=>{lifetime();try{assertStatefulOwnerViewV2(owner,await adapter.completedView(read),view);}finally{lifetime();}};
+   await current();
+   const query=(input:IndexedRequestV1):Promise<IndexedResultV1>=>{
+    const pending=(async()=>{
+     let started=false;
+     try{
+      admit();runtimeCheck(!busy,'concurrent operations are unavailable');
+      const request=captureIndexedRequestV1(selection,input);
+      const available=remaining();
+      charge('queryBytes',new TextEncoder().encode(JSON.stringify(request)).length);charge('predicates',request.where.length);
+      charge('orderTerms',request.kind==='page'?request.order.length:0);
+      charge('setValues',request.where.reduce((total,item)=>total+('values' in item?item.values.length:0),0));
+      runtimeCheck(available.readAttempts>0&&available.responseBytes>=2,'read total exceeded');
+      if(request.kind==='count')runtimeCheck(available.responseRecords>=1,'responseRecords total exceeded');
+      charge('readAttempts',1);busy=true;started=true;await current();admit();
+      let raw:Awaited<ReturnType<IndexedAdapterV1['queryCompleted']>>;
+      try{raw=await adapter.queryCompleted(read,view,request,available,declaration);}finally{admit();}
+      let result:IndexedResultV1;
+      try{
+       const answer=object(raw,['view','queryDeclarationDigest','result','attempts']);
+       runtimeCheck(answer.queryDeclarationDigest===declaration.digest,'query declaration differs','stateful.stale-view');
+       runtimeCheck(Number.isSafeInteger(answer.attempts)&&(answer.attempts as number)>=1&&(answer.attempts as number)<=available.readAttempts,'native attempt total exceeded');
+       charge('readAttempts',(answer.attempts as number)-1);assertStatefulOwnerViewV2(owner,answer.view,view);
+       result=captureIndexedResultV1(selection,request,answer.result);
+       charge('responseRecords',result.kind==='count'?1:result.rows.length);snapshot(raw);
+      }catch(error){if(error instanceof StatefulContractError)throw error;throw new StatefulContractError('stateful.unavailable','Indexed result capture refused: '+(error instanceof Error?error.message:'invalid result'));}
+      await current();admit();return result;
+     }catch(error){throw poison(error);}finally{if(started)busy=false;}
+    })();
+    // Observe the host-owned work even when a plugin drops its promise. It still poisons/refuses completion.
+    void pending.catch(()=>{});return pending;
+   };
+   const reader:IndexedReadV1=Object.freeze({view,query});
+   let value:unknown;
+   try{value=await use(reader);}finally{admit();}
+   runtimeCheck(!busy,'unawaited work prevents completion');accepting=false;
+   await current();
+   const result=snapshot({view,value}) as unknown as StatefulQueryResult;
+   lifetime();return result;
+  });
+  publicationGuard();publications.set(composed,{guard:publicationGuard,value:composed.value});return composed;
+ }catch(error){throw poison(error);}finally{accepting=false;open=false;}
+}
+
+/** Recheck the original request/owner authority at a cache or onSend boundary; copied DTOs never qualify. */
+export function assertIndexedQueryPublicationV1(result:StatefulQueryResult):void {
+ const publication=publications.get(result);runtimeCheck(publication,'locally completed composition required','stateful.invalid-contract');publication.guard();
+}
+/** Serialize the frozen composed body under its retained original publication guard, without reopening a read or extending a deadline. */
+export function serializeIndexedQueryResultV1(result:StatefulQueryResult):string {
+ assertIndexedQueryPublicationV1(result);const publication=publications.get(result)!;
+ const text=JSON.stringify(publication.value);publication.guard();return text;
 }
