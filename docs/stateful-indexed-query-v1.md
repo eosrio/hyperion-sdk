@@ -21,7 +21,11 @@ source semantics. This family neither assumes binary order nor adds a unique pub
 
 All predicates are conjunctive. `text-contains` is a literal contiguous substring, with no wildcard
 expansion, implicit case folding or normalization. `array-contains` is whole-element membership.
-Empty `in` is match-none. `not-in` applies only to declared nonnullable text. The plugin owns any
+Empty `in` is match-none. `in` supports declared nonnullable text or signed-int64 fields;
+int64 members must be canonical decimal strings in signed-int64 range, preserving exact values.
+Duplicates do not duplicate matching rows, and member order does not order the result. Input
+members are retained as supplied and count against the negotiated set and byte budgets.
+`not-in` applies only to declared nonnullable text. The plugin owns any
 reference-specific validation/transformation before capture. Nulls-last is explicit in each allowed
 order tuple. Offsets and exact counts retain nonnegative signed-int64 decimal strings without
 Number conversion. A page is the requested OFFSET/LIMIT window; a full window does not promise

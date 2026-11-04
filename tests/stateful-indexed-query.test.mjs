@@ -31,3 +31,20 @@ test('declaration and independent offers bind the actual owner generation',async
 test('literal text-contains capture preserves dots, wildcard-looking symbols and case without rewriting',async()=>{
  const {sel}=await setup();for(const value of ['a.b','a%b','a_b','UPPER','']){const captured=indexed.captureIndexedRequestV1(sel,{kind:'count',exact:true,where:[{field:'schema',op:'text-contains',value}]});assert.equal(captured.where[0].value,value);}
 });
+test('signed int64 membership is opt-in, exact, bounded and detached',async()=>{
+ const s=await setup(),model=structuredClone(s.dcl.model);model.fields.find(f=>f.id==='created').operators.push('in');
+ const decl=await indexed.captureIndexedDeclarationV1(s.d,'integer-set-v1',model);
+ assert.notEqual(decl.digest,s.dcl.digest);assert.throws(()=>indexed.negotiateIndexedQueryV1(decl,s.bounds,s.offer(),s.offer()));
+ const offer={...s.offer(),queryDeclarationDigests:[decl.digest]},sel=indexed.negotiateIndexedQueryV1(decl,s.bounds,offer,offer);
+ const values=['-9223372036854775808','-1','0','9007199254740993','9223372036854775807','0'];
+ const request={kind:'count',exact:true,where:[{field:'created',op:'in',values}]};const captured=indexed.captureIndexedRequestV1(sel,request);
+ values.push('1');assert.deepEqual(captured.where[0].values,['-9223372036854775808','-1','0','9007199254740993','9223372036854775807','0']);assert.ok(Object.isFrozen(captured.where[0].values));
+ assert.deepEqual(indexed.captureIndexedRequestV1(sel,{kind:'count',exact:true,where:[{field:'created',op:'in',values:[]}]}).where[0].values,[]);
+ for(const bad of ['01','-0','+1','null','1.0','9223372036854775808','-9223372036854775809',1,null])
+  assert.throws(()=>indexed.captureIndexedRequestV1(sel,{kind:'count',exact:true,where:[{field:'created',op:'in',values:[bad]}]}));
+ assert.throws(()=>indexed.captureIndexedRequestV1(sel,{kind:'count',exact:true,where:[{field:'created',op:'in',values:Array(11).fill('1')}]}));
+ const larger={...s.bounds,setValues:16},wideOffer={...offer,limits:larger},wide=indexed.negotiateIndexedQueryV1(decl,larger,wideOffer,wideOffer);
+ const eleven=Array.from({length:11},(_,i)=>String(i+1));assert.deepEqual(indexed.captureIndexedRequestV1(wide,{kind:'count',exact:true,where:[{field:'created',op:'in',values:eleven}]}).where[0].values,eleven);
+ assert.throws(()=>indexed.captureIndexedRequestV1(sel,{kind:'count',exact:true,where:[{field:'created',op:'in',values:Array(6).fill('1')},{field:'schema',op:'in',values:Array(5).fill('x')}]}));
+ for(const op of ['not-in','array-contains','text-contains']){const broken=structuredClone(model);broken.fields.find(f=>f.id==='created').operators.push(op);await assert.rejects(indexed.captureIndexedDeclarationV1(s.d,'unsupported',broken));}
+});
