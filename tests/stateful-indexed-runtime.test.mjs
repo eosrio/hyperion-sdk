@@ -59,6 +59,15 @@ test('multi-model dispatch receives the selected immutable declaration, while le
  legacy.adapter.queryCompleted=async function(read,view,request,remaining){return old(read,view,request,remaining);};
  assert.equal((await query(legacy,count())).value.result.value,'3');
 });
+test('int64 membership requires both offers before reads and retains exact bounded values through composition',async()=>{
+ const s=await prepared(),model=structuredClone(s.queryDeclaration.model);model.id='integer-set';model.fields.find(f=>f.id==='created').operators.push('in');
+ const declaration=await sdk.captureIndexedDeclarationV1(s.declaration,'integer-set-v1',model),request=count({where:[{field:'created',op:'in',values:['-2','0','1','1','9007199254740993']}]});
+ assert.throws(()=>sdk.negotiateIndexedQueryV1(declaration,indexedLimits(),offer([declaration]),s.adapter.indexedCapabilities));assert.equal(s.adapter.acquired,0);
+ s.adapter.addDeclaration(declaration);const selection=sdk.negotiateIndexedQueryV1(declaration,indexedLimits(),offer([declaration]),s.adapter.indexedCapabilities);
+ s.adapter.plan(request,{kind:'count',exact:true,value:'3'},1,declaration);
+ const result=await sdk.composeStatefulOwnerIndexedReadV1(selection,s.adapter,s.adapter.identity,s.adapter.view,async read=>({answer:await read.query(request)}),s.adapter.guard);
+ assert.equal(result.value.answer.value,'3');assert.equal(s.adapter.queryCalls,1);assert.equal(s.adapter.closed,1);
+});
 
 test('wrong returned model/view/backend/generation/revision/checkpoint refuses and closes',async()=>{
  for(const change of [a=>{a.queryDeclarationDigest='f'.repeat(64);},a=>{a.view.declarationDigest='f'.repeat(64);},a=>{a.view.backendId='other';},
