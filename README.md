@@ -132,3 +132,7 @@ and chain/runtime qualification have their own acceptance evidence.
 Licensed under [MIT](LICENSE).
 
 The independent [operator-list read family](docs/operator-lists.md) supplies bounded, detached operator data reads without chain authority.
+
+The separate opt-in [indexed completed execution family](docs/stateful-indexed-execution-v1.md)
+models host-verified semantic outcomes without widening existing query results. Its trusted native
+observer and MongoDB/PostgreSQL/HTTP qualification remain pending; no default offer is activated.
