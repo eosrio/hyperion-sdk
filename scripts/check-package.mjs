@@ -71,6 +71,7 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
   await writeFile(join(consumer, 'stateful-complete-kind.mts'),
     await readFile(join(root, 'tests/consumers/stateful-complete-kind.mts'), 'utf8'));
   await writeFile(join(consumer, 'stateful-indexed-query-v1.mts'), await readFile(join(root, 'tests/consumers/stateful-indexed-query-v1.mts'), 'utf8'));
+  await writeFile(join(consumer, 'stateful-indexed-execution-v1.mts'), await readFile(join(root, 'tests/consumers/stateful-indexed-execution-v1.mts'), 'utf8'));
   await writeFile(join(consumer, 'operator-lists.mts'), await readFile(join(root, 'tests/consumers/operator-lists.mts'), 'utf8'));
   await writeFile(join(consumer, 'stateful-runtime.mjs'),
     await readFile(join(root, 'tests/consumers/stateful-projection.mjs'), 'utf8'));
@@ -81,7 +82,7 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
   await mkdir(join(consumer, 'tests/fixtures'), {recursive: true});
   for (const relative of ['stateful-complete-kind.test.mjs', 'fixtures/stateful-complete-kind-reference.mjs', 'fixtures/stateful-reference.mjs',
     'fixtures/stateful-legacy-captures.mjs', 'fixtures/complete-kind-legacy.json', 'stateful-indexed-runtime.test.mjs',
-    'fixtures/stateful-indexed-runtime-reference.mjs']) {
+    'fixtures/stateful-indexed-runtime-reference.mjs', 'stateful-indexed-execution.test.mjs']) {
     let content = await readFile(join(root, 'tests', relative), 'utf8');
     content = content.replace('../dist/projection-stateful-owner-v2.js?independent-complete-kind',
       '../node_modules/@eosrio/hyperion-sdk/dist/projection-stateful-owner-v2.js?independent-complete-kind');
@@ -94,6 +95,7 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
       '../node_modules/@eosrio/hyperion-sdk/dist/projection-stateful-indexed-query-v1.js?independent-runtime');
     content = content.replaceAll('../../dist/projection-stateful-indexed-query-v1.js', '@eosrio/hyperion-sdk/projection-stateful-indexed-query-v1')
       .replaceAll('../dist/projection-stateful-indexed-query-v1.js', '@eosrio/hyperion-sdk/projection-stateful-indexed-query-v1');
+    content = content.replaceAll('../dist/projection-stateful-indexed-execution-v1.js', '@eosrio/hyperion-sdk/projection-stateful-indexed-execution-v1');
     await writeFile(join(consumer, 'tests', relative), content);
   }
   // No @types/node dependency is needed by the consumer; declarations must be independently usable.
@@ -101,7 +103,7 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
     '--target', 'ES2022', '--module', 'NodeNext', '--resolveJsonModule', 'consumer.mts',
     'protocol-abi-observations.mts', 'protocol-native-actions.mts', 'projection.mts', 'projection-rollback.mts',
     'projection-recovery.mts', 'projection-contextual.mts', 'projection-contextual-recovery.mts', 'stateful-projection.mts', 'stateful-owner-v2.mts',
-    'stateful-complete-kind.mts', 'operator-lists.mts', 'stateful-indexed-query-v1.mts'], { cwd: consumer, stdio: 'inherit' });
+    'stateful-complete-kind.mts', 'operator-lists.mts', 'stateful-indexed-query-v1.mts', 'stateful-indexed-execution-v1.mts'], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'consumer.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'protocol-abi-observations.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'protocol-native-actions.mjs')], { cwd: consumer, stdio: 'inherit' });
@@ -116,8 +118,10 @@ if (lookup.kind !== 'abi-required' || lookup.account !== 'sysio') throw new Erro
   execFileSync(process.execPath, [join(consumer, 'stateful-complete-kind.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, ['--test', join(consumer, 'tests/stateful-complete-kind.test.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, ['--test', join(consumer, 'tests/stateful-indexed-runtime.test.mjs')], { cwd: consumer, stdio: 'inherit' });
+  execFileSync(process.execPath, ['--test', join(consumer, 'tests/stateful-indexed-execution.test.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'operator-lists.mjs')], { cwd: consumer, stdio: 'inherit' });
   execFileSync(process.execPath, [join(consumer, 'stateful-indexed-query-v1.mjs')], { cwd: consumer, stdio: 'inherit' });
+  execFileSync(process.execPath, [join(consumer, 'stateful-indexed-execution-v1.mjs')], { cwd: consumer, stdio: 'inherit' });
   console.log('Packed ESM, JSON Schema and TypeScript consumer passed.');
 } finally {
   await rm(temporary, { recursive: true, force: true });
