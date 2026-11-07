@@ -64,7 +64,8 @@ test('copied, foreign-module and absent selections never acquire a read or execu
 test('capability removal, decrease or absent operation refuses before native acquisition and plugin code', async () => {
   for (const mutate of [adapter => {adapter.completeKindCapabilities = undefined;},
     adapter => {adapter.completeKindCapabilities = offer({...completeLimits(), responseRecords: 1});},
-    adapter => {adapter.readCompletedKind = undefined;}, adapter => {adapter.capabilities = {...adapter.capabilities, supported: []};}]) {
+    adapter => {adapter.readCompletedKind = undefined;}, adapter => {adapter.readCompletedKey = undefined;},
+    adapter => {adapter.capabilities = {...adapter.capabilities, supported: []};}]) {
     const state = await prepared(); mutate(state.adapter); let callbacks = 0;
     await assert.rejects(call(state, async () => {callbacks++; return {};}));
     assert.equal(state.adapter.acquired, 0); assert.equal(callbacks, 0);
@@ -161,6 +162,41 @@ test('the new callback preserves the existing zero keyed-read bound without cons
   await assert.rejects(call(state, async reader => ({value: await reader.get('schema', 'known')})), /Key\/read/);
   assert.equal(state.adapter.getCalls, 0);
   assert.deepEqual(plain((await call(state)).value), {rows: []});
+});
+
+test('keyed data-read retries cannot exceed the selected shared native attempt total', async () => {
+  const state = await prepared({...completeLimits(), readAttempts: 1}); state.adapter.keyedAttempts = 3;
+  await assert.rejects(call(state, async reader => ({value: await reader.get('collection', 'x')})), /attempt budget/);
+  assert.equal(state.adapter.nativeDataAttempts, 1); assert.equal(state.adapter.closed, 1);
+});
+
+test('reported keyed retry attempts and enumeration share one selected data-read allowance', async () => {
+  const state = await prepared({...completeLimits(), readAttempts: 4}); state.adapter.keyedAttempts = 3;
+  await call(state, async reader => {await reader.get('collection', 'x'); await reader.all('collection'); return {};});
+  assert.equal(state.adapter.nativeDataAttempts, 4); assert.equal(state.adapter.keyRequests[0].readAttempts, 4);
+  assert.equal(state.adapter.requests[0].readAttempts, 1);
+  const exhausted = await prepared({...completeLimits(), readAttempts: 3}); exhausted.adapter.keyedAttempts = 3;
+  await assert.rejects(call(exhausted, async reader => {await reader.get('collection', 'x'); await reader.all('collection'); return {};}), /read total/);
+  assert.equal(exhausted.adapter.nativeDataAttempts, 3); assert.equal(exhausted.adapter.kindCalls, 0);
+});
+
+test('invalid or excess reported keyed retries refuse and catching a native keyed overflow cannot complete', async () => {
+  for (const attempts of [0, -1, 1.5, 13, Number.MAX_SAFE_INTEGER + 1, '1', null]) {
+    const state = await prepared(); state.adapter.beforeReturn = async (_, answer) => {answer.attempts = attempts;};
+    await assert.rejects(call(state, async reader => ({value: await reader.get('collection', 'x')})), /attempt total/);
+  }
+  const state = await prepared({...completeLimits(), readAttempts: 1}); state.adapter.keyedAttempts = 3;
+  await assert.rejects(call(state, async reader => {try {await reader.get('collection', 'x');} catch {} return {}; }), /attempt budget/);
+  assert.equal(state.adapter.nativeDataAttempts, 1);
+});
+
+test('owner/completed-view authority checks do not consume projection data-read attempts', async () => {
+  const state = await prepared({...completeLimits(), readAttempts: 1}), current = state.adapter.completedView.bind(state.adapter);
+  let checks = 0;
+  state.adapter.completedView = async read => {checks++; return current(read);};
+  await call(state, async () => ({})); assert.ok(checks >= 2); assert.equal(state.adapter.nativeDataAttempts, 0);
+  await call(state, async reader => ({value: await reader.get('collection', 'x')}));
+  assert.ok(checks >= 6); assert.equal(state.adapter.nativeDataAttempts, 1);
 });
 
 test('invalid, zero, unsafe and excess reported native attempts all refuse', async () => {

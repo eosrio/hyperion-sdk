@@ -22,7 +22,8 @@ export class CompleteKindReference {
     this.view = {declarationDigest: declaration.digest, backendId: declaration.projection.definition.binding.backendId,
       generation: declaration.projection.definition.binding.generation, revision: hex(77), checkpoint: {blockNum: 1, blockId: hex(1)}};
     this.phase = 'idle'; this.live = true; this.closed = 0; this.acquired = 0; this.kindCalls = 0; this.getCalls = 0;
-    this.requests = []; this.rows = new Map(); this.pageSize = 2; this.beforeReturn = undefined;
+    this.requests = []; this.keyRequests = []; this.rows = new Map(); this.pageSize = 2; this.beforeReturn = undefined;
+    this.keyedAttempts = 1; this.nativeDataAttempts = 0;
   }
   guard = () => {if (!this.live || this.phase !== 'idle') unavailable('Actual owner/request/phase authority is unavailable');};
   async completedRead(identity, view, guard) {
@@ -38,13 +39,30 @@ export class CompleteKindReference {
     return state;
   }
   async completedView(read) {this.use(read); return clone(this.view);}
-  async readCompleted(read, expected, keys) {
+  async keyData(read, expected, keys, maximumAttempts) {
     this.use(read, expected); this.getCalls++;
+    for (let attempt = 1; attempt <= this.keyedAttempts; attempt++) {
+      if (attempt > maximumAttempts) unavailable('Native keyed data-read attempt budget before retry');
+      this.use(read, expected); this.nativeDataAttempts++; await Promise.resolve(); this.use(read, expected);
+    }
     const answer = {view: clone(this.view), results: keys.map(({kind, key}) => {
       const value = this.rows.get(kind)?.get(key); return value === undefined ? {status: 'covered-absent'} : {status: 'present', value: clone(value)};
     })};
-    if (this.beforeReturn) await this.beforeReturn('get', answer);
+    return answer;
+  }
+  async readCompleted(read, expected, keys) {
+    const answer = await this.keyData(read, expected, keys, Infinity);
+    if (this.beforeReturn) await this.beforeReturn('legacy-get', answer);
     this.use(read, expected); return answer;
+  }
+  async readCompletedKey(read, expected, key, remaining) {
+    this.keyRequests.push(clone(remaining));
+    if (remaining.responseRecords < 1) unavailable('Native keyed record total exceeded');
+    const answer = await this.keyData(read, expected, [key], remaining.readAttempts);
+    const counted = {view: answer.view, result: answer.results[0], attempts: this.keyedAttempts};
+    if (Buffer.byteLength(JSON.stringify(counted)) > remaining.responseBytes) unavailable('Native keyed serialized byte bound');
+    if (this.beforeReturn) await this.beforeReturn('get', counted);
+    this.use(read, expected); return counted;
   }
   async readCompletedKind(read, expected, kind, remaining) {
     this.use(read, expected); this.kindCalls++; this.requests.push(clone(remaining));
@@ -53,6 +71,7 @@ export class CompleteKindReference {
     // Explicit empty terminal page; a short nonempty page is never interpreted as exhaustion.
     for (;;) {
       if (++attempts > remaining.readAttempts) unavailable('Native attempt budget before exhaustion');
+      this.nativeDataAttempts++;
       const page = source.slice(offset, offset + this.pageSize); offset += page.length;
       if (page.length === 0) break;
       for (const [key, value] of page) {
